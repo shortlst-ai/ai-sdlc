@@ -9,6 +9,7 @@ const path = require('node:path');
 const TRACKS = ['quick', 'standard', 'critical'];
 
 const DONE = 'done';
+const ABANDONED = 'abandoned';
 
 const ARTIFACTS = {
   reproduce: 'evidence/reproduce.md',
@@ -52,6 +53,10 @@ const FLOWS = {
 };
 
 const REWORK_FROM = ['verify', 'review'];
+
+function isOpen(item) {
+  return item.stage !== DONE && item.stage !== ABANDONED;
+}
 
 function trackRank(track) {
   return TRACKS.indexOf(track);
@@ -106,7 +111,7 @@ function classify(files, config) {
 // `facts.artifacts` maps artifact paths to their hash, or null when missing.
 // `facts.approvals` maps stage names to their recorded approval, if any.
 function nextAction(item, facts) {
-  if (item.stage === DONE) return { action: 'none' };
+  if (!isOpen(item)) return { action: 'none' };
 
   const flow = FLOWS[item.track];
   const current = stageIndex(item.track, item.stage);
@@ -163,7 +168,7 @@ function rework(item, limit) {
 // Stages the new track doesn't have restart at its first stage, so a change
 // raised off the quick track backfills the artifacts it skipped.
 function raiseTrack(item, track) {
-  if (item.stage === DONE) return { ok: false, reason: `${item.id} is already done` };
+  if (!isOpen(item)) return { ok: false, reason: `${item.id} is already ${item.stage}` };
   if (trackRank(track) < trackRank(item.track)) {
     return { ok: false, reason: `can't lower the track from '${item.track}' to '${track}'` };
   }
@@ -171,21 +176,29 @@ function raiseTrack(item, track) {
   return { ok: true, item: { ...item, track, stage } };
 }
 
+function abandon(item) {
+  if (!isOpen(item)) return { ok: false, reason: `${item.id} is already ${item.stage}` };
+  return { ok: true, item: { ...item, stage: ABANDONED } };
+}
+
 function isValidItem(item) {
   if (!item || !TRACKS.includes(item.track)) return false;
   if (!Number.isInteger(item.rework) || !Array.isArray(item.history)) return false;
-  return item.stage === DONE || stageIndex(item.track, item.stage) !== -1;
+  return !isOpen(item) || stageIndex(item.track, item.stage) !== -1;
 }
 
 module.exports = {
+  ABANDONED,
   ARTIFACTS,
   DONE,
   FLOWS,
   TRACKS,
+  abandon,
   advance,
   classify,
   describeNext,
   firstStage,
+  isOpen,
   isValidItem,
   matchesAny,
   nextAction,

@@ -403,8 +403,8 @@ describe('managed files through Bash', () => {
     });
   }
 
-  test('running the approval hook directly is refused', () => {
-    denied(run('node plugins/sdlc/scripts/on-approve.js'), /typing \/sdlc:approve/);
+  test('running the human command hook directly is refused', () => {
+    denied(run('node plugins/sdlc/scripts/on-human-command.js approve'), /person typing/);
   });
 
   for (const command of [`cat ${state}`, `jq . ${approval}`, `git add ${approval}`, `ls .sdlc/work/0001-x/approvals`]) {

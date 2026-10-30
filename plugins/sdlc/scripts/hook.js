@@ -20,7 +20,7 @@ function refuse(reason) {
 function openItems(root) {
   return workspace
     .ownItems(root)
-    .filter((item) => item.stage !== machine.DONE)
+    .filter(machine.isOpen)
     .map((item) => {
       const next = machine.nextAction(item, workspace.readFacts(root, item));
       return { item, next, describeNext: machine.describeNext(next) };

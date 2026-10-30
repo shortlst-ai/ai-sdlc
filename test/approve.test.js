@@ -9,7 +9,7 @@ const { test } = require('node:test');
 
 const PLUGIN = path.join(__dirname, '..', 'plugins', 'sdlc');
 const CLI = path.join(PLUGIN, 'bin', 'sdlc');
-const HOOK = path.join(PLUGIN, 'scripts', 'on-approve.js');
+const HOOK = path.join(PLUGIN, 'scripts', 'on-human-command.js');
 const ID = '0001-feature';
 
 // Ignores the machine's own git identity, and any attended flag from the session
@@ -23,9 +23,9 @@ function sdlc(args, cwd) {
   return spawnSync(CLI, args, { cwd, encoding: 'utf8', env: env() });
 }
 
-function hook(cwd, { args = '', extraEnv } = {}) {
-  const input = JSON.stringify({ cwd, command_name: 'sdlc:approve', command_args: args });
-  const result = spawnSync('node', [HOOK], { input, encoding: 'utf8', env: env(extraEnv) });
+function hook(cwd, { args = '', extraEnv, command = 'approve' } = {}) {
+  const input = JSON.stringify({ cwd, command_name: `sdlc:${command}`, command_args: args });
+  const result = spawnSync('node', [HOOK, command], { input, encoding: 'utf8', env: env(extraEnv) });
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 }
@@ -101,7 +101,7 @@ test('refuses when nothing is waiting on approval', (t) => {
   const cwd = repo(t);
   const output = hook(cwd);
   assert.equal(output.decision, 'block');
-  assert.match(output.reason, /Not approved: .*write spec.md/);
+  assert.match(output.reason, /Not recorded: .*write spec.md/);
   assert.equal(fs.existsSync(itemPath(cwd, 'approvals')), false);
 });
 
@@ -156,14 +156,69 @@ test('the CLI has no way to approve', (t) => {
   assert.equal(fs.existsSync(itemPath(cwd, 'approvals')), false);
 });
 
-test('the skill can\'t be invoked by the model', () => {
-  const skill = fs.readFileSync(path.join(PLUGIN, 'skills', 'approve', 'SKILL.md'), 'utf8');
-  assert.match(skill, /^disable-model-invocation: true$/m);
-});
+for (const name of ['approve', 'abandon']) {
+  test(`the ${name} skill can't be invoked by the model`, () => {
+    const skill = fs.readFileSync(path.join(PLUGIN, 'skills', name, 'SKILL.md'), 'utf8');
+    assert.match(skill, /^disable-model-invocation: true$/m);
+  });
+}
 
 test('the hook is wired to the skill and fails closed', () => {
   const hooks = JSON.parse(fs.readFileSync(path.join(PLUGIN, 'hooks', 'hooks.json'), 'utf8'));
-  const [entry] = hooks.hooks.UserPromptExpansion;
-  assert.equal(entry.matcher, 'sdlc:approve');
-  assert.equal(entry.hooks[0].onFailure, 'block');
+  const entries = hooks.hooks.UserPromptExpansion;
+  assert.deepEqual(entries.map((entry) => entry.matcher), ['sdlc:approve', 'sdlc:abandon']);
+  assert.deepEqual(entries.map((entry) => entry.hooks[0].args[1]), ['approve', 'abandon']);
+  for (const entry of entries) assert.equal(entry.hooks[0].onFailure, 'block');
+});
+
+function abandon(cwd, args, extraEnv) {
+  return hook(cwd, { args, extraEnv, command: 'abandon' });
+}
+
+test('abandoning closes the item, keeps it, and records why and who', (t) => {
+  const cwd = repo(t);
+  const output = abandon(cwd, 'wrong approach entirely');
+  assert.match(output.hookSpecificOutput.additionalContext, /^Abandon recorded: 0001-feature, because wrong approach entirely/);
+  const item = readItem(cwd);
+  assert.equal(item.stage, 'abandoned');
+  const event = item.history.at(-1);
+  assert.equal(event.reason, 'wrong approach entirely');
+  assert.equal(event.abandoned_from, 'spec');
+  assert.equal(event.by.name, 'Ada Reviewer');
+});
+
+test('an abandoned item stops blocking and can\'t move again', (t) => {
+  const cwd = repo(t);
+  abandon(cwd, 'not needed');
+  assert.equal(nextAction(cwd).action, 'new');
+  assert.equal(sdlc(['advance', '1'], cwd).status, 1);
+  assert.equal(sdlc(['track', '1', 'critical'], cwd).status, 1);
+  assert.equal(abandon(cwd, '1 again').decision, 'block');
+});
+
+test('abandoning needs a reason', (t) => {
+  const cwd = repo(t);
+  assert.match(abandon(cwd, '').reason, /give a reason/);
+  assert.match(abandon(cwd, '1').reason, /give a reason/);
+  assert.notEqual(readItem(cwd).stage, 'abandoned');
+});
+
+test('an id picks the item, and a reason can start with a word', (t) => {
+  const cwd = repo(t);
+  sdlc(['new', 'other'], cwd);
+  assert.match(abandon(cwd, 'no id given').reason, /several open work items/);
+  assert.equal(abandon(cwd, '1 superseded by other').decision, undefined);
+  assert.equal(readItem(cwd).stage, 'abandoned');
+  assert.equal(readItem(cwd).history.at(-1).reason, 'superseded by other');
+});
+
+test('abandoning refuses in an unattended session', (t) => {
+  const cwd = repo(t);
+  const output = abandon(cwd, 'skip this gate', { CLAUDE_CODE_SESSION_ATTENDED: '0' });
+  assert.equal(output.decision, 'block');
+  assert.equal(readItem(cwd).stage, 'spec');
+});
+
+test('the CLI has no way to abandon', (t) => {
+  assert.equal(sdlc(['abandon', '--reason', 'x'], repo(t)).status, 2);
 });

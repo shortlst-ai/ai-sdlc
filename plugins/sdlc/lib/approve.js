@@ -1,8 +1,8 @@
 'use strict';
 
-// Records a human approval. This is reached only through the UserPromptExpansion
-// hook, and the CLI has no approve command on purpose: the model can run the CLI,
-// and it must not be able to approve its own work.
+// Decisions only a person can make. These are reached only through the
+// UserPromptExpansion hook, and the CLI has no such commands on purpose: the model
+// can run the CLI, and it must not be able to approve or drop its own work.
 
 const { execFileSync } = require('node:child_process');
 
@@ -52,4 +52,17 @@ function approve({ cwd, query }) {
   return { id: item.id, ...record };
 }
 
-module.exports = { approve };
+// The item stays on disk with its reason, so abandoning leaves an audit trail.
+function abandon({ cwd, query, reason }) {
+  if (!reason) throw new SdlcError('give a reason: /sdlc:abandon [id] <reason>');
+  const root = workspace.findRoot(cwd);
+  if (!root) throw new SdlcError('this repo does not use the factory: run sdlc init');
+  const item = workspace.activeItem(root, query);
+  const result = machine.abandon(item);
+  if (!result.ok) throw new SdlcError(result.reason);
+  const event = { at: new Date().toISOString(), abandoned_from: item.stage, reason, by: approver(root) };
+  workspace.saveItem(root, { ...result.item, history: [...item.history, event] });
+  return { id: item.id, reason };
+}
+
+module.exports = { abandon, approve };

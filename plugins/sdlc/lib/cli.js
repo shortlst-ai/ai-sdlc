@@ -9,7 +9,7 @@ const machine = require('./machine');
 const { collect } = require('./metrics');
 const workspace = require('./workspace');
 
-const { DONE, TRACKS } = machine;
+const { TRACKS, isOpen } = machine;
 const { SdlcError } = workspace;
 
 const USAGE = `Usage: sdlc <command>
@@ -65,7 +65,7 @@ function record(item, event) {
 }
 
 function repoNext(items) {
-  const open = items.filter((item) => item.stage !== DONE);
+  const open = items.filter(isOpen);
   if (open.length === 0) return { action: 'new' };
   if (open.length === 1) return { id: open[0].id, ...open[0].next };
   return { action: 'choose', ids: open.map((item) => item.id) };
@@ -122,7 +122,7 @@ function advance(positionals) {
   const item = workspace.activeItem(root, positionals[0]);
   const result = machine.advance(item, workspace.readFacts(root, item));
   if (!result.ok) {
-    if (item.stage === DONE) throw new SdlcError(`${item.id} is already done`);
+    if (!isOpen(item)) throw new SdlcError(`${item.id} is already ${item.stage}`);
     throw new SdlcError(`can't advance ${item.id}: ${machine.describeNext(result.next)}`);
   }
   workspace.saveItem(root, record(result.item, { from: item.stage, to: result.item.stage }));

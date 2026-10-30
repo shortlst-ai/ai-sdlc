@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { ARTIFACTS, DONE, FLOWS, isValidItem } = require('./machine');
+const { ARTIFACTS, FLOWS, isOpen, isValidItem } = require('./machine');
 
 const SDLC_DIR = '.sdlc';
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -238,7 +238,7 @@ function ownItems(root) {
 // several is left to the caller rather than guessed at here.
 function activeItem(root, query) {
   if (query) return loadItem(root, resolveId(root, query));
-  const open = ownItems(root).filter((item) => item.stage !== DONE);
+  const open = ownItems(root).filter(isOpen);
   if (open.length === 1) return open[0];
   if (open.length === 0) throw new SdlcError('no open work items on this branch');
   throw new SdlcError(`several open work items, so name one: ${open.map((i) => i.id).join(', ')}`);
