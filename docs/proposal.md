@@ -307,7 +307,7 @@ All of these come from Git, the PR history, and CI.
 | --- | --- |
 | The factory becomes the ceremony it's meant to replace | Tracks, and the review after Phase 2. `quick` must stay fast |
 | Bash gates are incomplete, since command matching is best effort | Treat them as feedback only; CI is the control |
-| Local approvals can be forged by an agent with Bash | Accepted for solo use. On a team, the real approval is the PR review |
+| Local approvals can be forged by an agent with Bash, by writing the file directly or running `claude -p` | `/sdlc:approve` has no CLI path and refuses unattended sessions, but neither stops a determined agent. Accepted for solo use. On a team, the real approval is the PR review |
 | Hook latency in every session | Immediate exit without `.sdlc/`; hooks kept fast and measured |
 | Infinite block loops at `SubagentStop` | Retry budget, then escalate |
 | Claude Code's plugin surface changes quickly (`experimental.evals`, `experimental.monitors`) | Pin a minimum version; keep logic in the CLI, not in platform features |

@@ -59,37 +59,11 @@ function record(item, event) {
   return { ...item, history: [...item.history, { at: new Date().toISOString(), ...event }] };
 }
 
-// With no id given, the single open item is the active one. Choosing between
-// several is left to the caller rather than guessed at here.
-function activeItem(root, query) {
-  if (query) return workspace.loadItem(root, workspace.resolveId(root, query));
-  const items = workspace.listIds(root).map((id) => workspace.loadItem(root, id));
-  const open = items.filter((item) => item.stage !== DONE);
-  if (open.length === 1) return open[0];
-  if (open.length === 0) throw new SdlcError('no open work items');
-  throw new SdlcError(`several open work items, so name one: ${open.map((i) => i.id).join(', ')}`);
-}
-
 function repoNext(items) {
   const open = items.filter((item) => item.stage !== DONE);
   if (open.length === 0) return { action: 'new' };
   if (open.length === 1) return { id: open[0].id, ...open[0].next };
   return { action: 'choose', ids: open.map((item) => item.id) };
-}
-
-function formatNext(next) {
-  switch (next.action) {
-    case 'produce':
-      return `write ${next.artifact} for the ${next.stage} stage`;
-    case 'approve':
-      return next.stale
-        ? `${next.artifact} changed after approval, so ${next.stage} needs approving again`
-        : `a person must approve ${next.stage}`;
-    case 'advance':
-      return `advance to ${next.to}`;
-    default:
-      return 'nothing, this item is done';
-  }
 }
 
 function status(positionals, values) {
@@ -111,7 +85,7 @@ function status(positionals, values) {
   console.log(`Factory initialized at ${root}`);
   if (items.length === 0) console.log('No work items yet.');
   for (const item of items) {
-    console.log(`${item.id}  ${item.track}  ${item.stage}  next: ${formatNext(item.next)}`);
+    console.log(`${item.id}  ${item.track}  ${item.stage}  next: ${machine.describeNext(item.next)}`);
   }
   return 0;
 }
@@ -134,11 +108,11 @@ function createNew(positionals, values) {
 
 function advance(positionals) {
   const root = requireRoot();
-  const item = activeItem(root, positionals[0]);
+  const item = workspace.activeItem(root, positionals[0]);
   const result = machine.advance(item, workspace.readFacts(root, item));
   if (!result.ok) {
     if (item.stage === DONE) throw new SdlcError(`${item.id} is already done`);
-    throw new SdlcError(`can't advance ${item.id}: ${formatNext(result.next)}`);
+    throw new SdlcError(`can't advance ${item.id}: ${machine.describeNext(result.next)}`);
   }
   workspace.saveItem(root, record(result.item, { from: item.stage, to: result.item.stage }));
   console.log(`${item.id}  ${item.stage} -> ${result.item.stage}`);
@@ -148,7 +122,7 @@ function advance(positionals) {
 function rework(positionals, values) {
   if (!values.reason) throw new SdlcError('sdlc rework needs --reason', 2);
   const root = requireRoot();
-  const item = activeItem(root, positionals[0]);
+  const item = workspace.activeItem(root, positionals[0]);
   const result = machine.rework(item, workspace.loadConfig(root).limits.rework);
   if (!result.ok) throw new SdlcError(`can't rework ${item.id}: ${result.reason}`);
   workspace.archiveEvidence(root, item.id, result.item.rework);
@@ -164,7 +138,7 @@ function track(positionals, values) {
   const named = positionals.find((value) => TRACKS.includes(value));
   const query = positionals.find((value) => !TRACKS.includes(value));
   if (!named && !values.files) throw new SdlcError('sdlc track needs a track or --files', 2);
-  const item = activeItem(root, query);
+  const item = workspace.activeItem(root, query);
   const config = workspace.loadConfig(root);
   const candidates = [named, values.files && machine.classify(parseFiles(values.files), config)];
   const wanted = candidates.filter(Boolean);

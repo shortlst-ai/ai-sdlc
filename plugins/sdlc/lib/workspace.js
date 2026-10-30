@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { ARTIFACTS, FLOWS, isValidItem } = require('./machine');
+const { ARTIFACTS, DONE, FLOWS, isValidItem } = require('./machine');
 
 const SDLC_DIR = '.sdlc';
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -129,6 +129,18 @@ function resolveId(root, query) {
   throw new SdlcError(`no work item '${query}'`);
 }
 
+// With no id given, the single open item is the active one. Choosing between
+// several is left to the caller rather than guessed at here.
+function activeItem(root, query) {
+  if (query) return loadItem(root, resolveId(root, query));
+  const open = listIds(root)
+    .map((id) => loadItem(root, id))
+    .filter((item) => item.stage !== DONE);
+  if (open.length === 1) return open[0];
+  if (open.length === 0) throw new SdlcError('no open work items');
+  throw new SdlcError(`several open work items, so name one: ${open.map((i) => i.id).join(', ')}`);
+}
+
 function createItem(root, slug, track, stage) {
   if (!SLUG.test(slug)) {
     throw new SdlcError(`invalid slug '${slug}': use lowercase letters, digits, and hyphens`, 2);
@@ -160,6 +172,15 @@ function archiveEvidence(root, id, cycle) {
   }
 }
 
+function saveApproval(root, item, record) {
+  const dir = path.join(workDir(root), item.id, 'approvals');
+  fs.mkdirSync(dir, { recursive: true });
+  writeJson(path.join(dir, `${record.stage}.json`), record);
+  const { stage, sha256, approver, at } = record;
+  const event = { at, approved: stage, sha256, approver };
+  saveItem(root, { ...item, history: [...item.history, event] });
+}
+
 // Gathers what `nextAction` needs to know about one item from the disk.
 function readFacts(root, item) {
   const dir = path.join(workDir(root), item.id);
@@ -184,6 +205,7 @@ function readApproval(file) {
 
 module.exports = {
   SdlcError,
+  activeItem,
   archiveEvidence,
   createItem,
   findRoot,
@@ -193,5 +215,6 @@ module.exports = {
   loadItem,
   readFacts,
   resolveId,
+  saveApproval,
   saveItem,
 };
