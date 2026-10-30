@@ -272,7 +272,7 @@ Effort figures are rough, for one person working with Claude.
 | Phase | Scope | Exit criteria | Effort |
 | --- | --- | --- | --- |
 | **0. Foundation** | Marketplace skeleton, `sdlc` CLI and state machine, hook fixture tests. Capture a baseline on the target repo | CLI tests pass; `claude plugin validate --strict` passes; baseline recorded | 2-3 days |
-| **1. Core loop** | `standard` track, intent to PR, approvals, scope check, `sdlc-gates.yml` | 3 real changes merged on a real repo; a deliberate gate bypass is caught by CI | 1-2 weeks |
+| **1. Core loop** | `standard` track, intent to PR, approvals, scope check, `sdlc-gates.yml` | 3 real changes completed on `RCTResources` through the local gates; a deliberate gate bypass is caught by CI on this repo | 1-2 weeks |
 | **2. Tracks and learning** | `quick` and `critical` tracks, review integration, `/sdlc:learn`, evals, metrics | A small fix takes under 15 minutes of human time; eval suite runs in CI | 1-2 weeks |
 | **3. Deploy** | Environment tiers, release authorization, rehearsed rollback | Agent can reach production's gate and cannot pass it, proven by test | 1-2 weeks |
 | **4. Maintain** | `bands.yaml`, detection on CI failure rate, intent-writing diagnoser | A real breach becomes an intent PR with no human starting it | 1-2 weeks |
@@ -309,7 +309,7 @@ All of these come from Git, the PR history, and CI.
 | Infinite block loops at `SubagentStop` | Retry budget, then escalate |
 | Claude Code's plugin surface changes quickly (`experimental.evals`, `experimental.monitors`) | Pin a minimum version; keep logic in the CLI, not in platform features |
 | Node isn't guaranteed on every machine | Declare it as a prerequisite and have `/sdlc:init` check for it |
-| Branch protection isn't available on the current GitHub plan for private repos | Decide before Phase 1 (section 10) |
+| With 0 required approvals, an agent with merge rights could merge its own PR | Keep merge rights away from agents; raise the count when a second reviewer joins |
 
 **Not yet tested:**
 
@@ -333,21 +333,10 @@ Settled on 2026-10-30:
 1. **First audience:** a solo developer or small team on GitHub. Enterprise support comes later.
 2. **Plugin name:** `sdlc`, so commands read `/sdlc:next`.
 3. **Workflows:** optional, so the plugin works on any plan.
-4. **Dogfood repo:** `RCTResources`, a Python 3.12 data pipeline with pytest, ruff, and mypy. Its bulk data is gitignored, so CI can run from a clean checkout.
+4. **Dogfood repo:** `RCTResources`, a Python 3.12 data pipeline with pytest, ruff, and mypy. It stays local, with no GitHub remote for now.
 5. **Project management:** this repo lives on GitHub, with phases as milestones and work as issues.
+6. **Branch protection:** this repo is public, because the `shortlst-ai` account can't use branch protection on private repos. `main` requires a PR for everyone, including admins, and blocks force-pushes and deletion. Required approvals are 0, because GitHub doesn't let an author approve their own PR. A second reviewer can raise this later.
 
-Still open:
+### What a local dogfood repo changes
 
-6. **How do we get branch protection?** See below. This blocks the Phase 1 exit criteria.
-7. **Does `RCTResources` go on GitHub?** It has no remote today, and Layer 3 can't run without one.
-
-### Layer 3 needs a plan decision
-
-The `shortlst-ai` account can't use branch protection or rulesets on private repos. The API returns `Upgrade to GitHub Pro or make this repository public`. Without them, CI can still run and report failures, but nothing stops a merge. Layer 3 would then be advisory, which removes the only boundary an agent can't get around.
-
-| Option | Effect | Trade-off |
-| --- | --- | --- |
-| Upgrade the account to GitHub Pro | Protection works on private repos | A recurring cost |
-| Make the repos public | Protection works for free | Exposes code, history, and the commit email |
-| Move the repos to a paid organization | Protection plus real team roles | More setup and a higher cost |
-| Stay as is | Nothing is enforced at merge | Fails the Phase 1 exit criterion |
+Layer 3 can't run on `RCTResources` without a remote, so Phase 1 splits in two. Real changes exercise the local gates on `RCTResources`. Server enforcement, including the deliberate bypass test, is proven on this repo. The `sdlc-gates` logic should stay callable locally, so both paths run the same check.
