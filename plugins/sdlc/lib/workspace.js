@@ -21,6 +21,10 @@ const DEFAULT_CONFIG = {
   limits: { rework: 3 },
 };
 
+const UNREACHABLE_WARNING =
+  'This worktree has no .sdlc/, so the factory gates are off here. The main checkout ' +
+  'uses the factory: commit .sdlc/ to the base branch, then start a new worktree.';
+
 // A failure the user can act on, as opposed to a bug. `code` is the exit code.
 class SdlcError extends Error {
   constructor(message, code = 1) {
@@ -53,15 +57,42 @@ function sha256(file) {
   }
 }
 
-// Walks up from the working directory, so the CLI works from any subfolder.
+// Walks up from the working directory, so the CLI works from any subfolder. It
+// stops at the git boundary because a native worktree sits inside the main repo,
+// and walking past it would silently use the main checkout's .sdlc/.
 function findRoot(start) {
   let dir = path.resolve(start);
   for (;;) {
     if (fs.existsSync(path.join(dir, SDLC_DIR))) return dir;
+    if (fs.existsSync(path.join(dir, '.git'))) return null;
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
+}
+
+function gitTop(start) {
+  let dir = path.resolve(start);
+  for (;;) {
+    if (fs.existsSync(path.join(dir, '.git'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+// In a linked worktree `.git` is a file pointing at <main>/.git/worktrees/<name>.
+// Returns the main checkout when it uses the factory and this worktree can't see
+// it, which happens when .sdlc/ was never committed to the base branch.
+function unreachableFactory(start) {
+  const top = gitTop(start);
+  if (!top || findRoot(start)) return null;
+  const marker = path.join(top, '.git');
+  if (!fs.statSync(marker).isFile()) return null;
+  const match = /^gitdir: (.+)\.git\/worktrees\//m.exec(fs.readFileSync(marker, 'utf8'));
+  if (!match) return null;
+  const main = match[1].replace(/\/$/, '');
+  return fs.existsSync(path.join(main, SDLC_DIR)) ? main : null;
 }
 
 function workDir(root) {
@@ -207,6 +238,7 @@ function readApproval(file) {
 
 module.exports = {
   SdlcError,
+  UNREACHABLE_WARNING,
   activeItem,
   archiveEvidence,
   createItem,
@@ -219,4 +251,5 @@ module.exports = {
   resolveId,
   saveApproval,
   saveItem,
+  unreachableFactory,
 };

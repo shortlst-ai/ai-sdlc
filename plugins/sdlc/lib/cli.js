@@ -72,8 +72,14 @@ function repoNext(items) {
 function status(positionals, values) {
   const root = workspace.findRoot(process.cwd());
   if (!root) {
-    if (values.json) console.log(JSON.stringify({ initialized: false, root: null }));
-    else console.log('This repo does not use the factory: no .sdlc/ directory found.');
+    const main = workspace.unreachableFactory(process.cwd());
+    if (values.json) {
+      console.log(JSON.stringify({ initialized: false, root: null, ...(main && { main_checkout: main }) }));
+    } else if (main) {
+      console.log(workspace.UNREACHABLE_WARNING);
+    } else {
+      console.log('This repo does not use the factory: no .sdlc/ directory found.');
+    }
     return 0;
   }
   const ids = positionals[0]

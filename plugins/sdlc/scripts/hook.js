@@ -118,7 +118,12 @@ function main() {
   if (!handler) throw new Error(`unknown hook '${process.argv[2]}'`);
   const input = JSON.parse(fs.readFileSync(0, 'utf8'));
   const root = workspace.findRoot(input.cwd);
-  if (!root) return;
+  if (!root) {
+    if (process.argv[2] === 'session-start' && workspace.unreachableFactory(input.cwd)) {
+      console.log(workspace.UNREACHABLE_WARNING);
+    }
+    return;
+  }
   try {
     handler(root, input);
   } catch (error) {
