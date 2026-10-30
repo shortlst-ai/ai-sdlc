@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { parseArgs } = require('node:util');
 
+const { reviewBuild } = require('./check');
 const machine = require('./machine');
 const { collect } = require('./metrics');
 const workspace = require('./workspace');
@@ -20,6 +21,8 @@ Commands:
   new <slug> [--files a,b] [--track T]
                                      Start a work item. Files decide the track
   status [<id>] [--json]             Show work items and the next action
+  check [<id>]                       Compare the real diff to the plan's scope
+  verify [<id>]                      Run the verify command and record evidence
   advance [<id>]                     Move to the next stage if its gate passes
   rework [<id>] --reason <text>      Send verify or review back to build
   track [<id>] [<track>] [--files a,b]
@@ -112,20 +115,69 @@ function createNew(positionals, values) {
   if (machine.trackRank(track) < machine.trackRank(classified)) {
     throw new SdlcError(`these files need at least the '${classified}' track, not '${track}'`);
   }
-  const item = workspace.createItem(root, slug, track, machine.firstStage(track));
+  const item = workspace.createItem(root, slug, track, machine.firstStage(track), files);
   console.log(`${item.id}  ${item.track}  ${item.stage}`);
+  return 0;
+}
+
+function check(positionals) {
+  const root = requireRoot();
+  const item = workspace.activeItem(root, positionals[0]);
+  const { problems } = reviewBuild(root, item, workspace.loadConfig(root));
+  if (problems.length > 0) throw new SdlcError(`${item.id}: ${problems.join('; ')}`);
+  console.log(`${item.id}: the changes match the plan.`);
+  return 0;
+}
+
+function tail(text, lines) {
+  return text.trimEnd().split('\n').slice(-lines).join('\n');
+}
+
+// The tool writes the evidence, not an agent, so it's the test output itself. A
+// failing run removes any earlier pass, so an old result can't stand in for it.
+function verify(positionals) {
+  const root = requireRoot();
+  const item = workspace.activeItem(root, positionals[0]);
+  if (item.stage !== 'verify') throw new SdlcError(`${item.id} is at ${item.stage}, not verify`);
+  const command = workspace.loadConfig(root).commands?.verify;
+  if (!command) throw new SdlcError('set commands.verify in .sdlc/config.json');
+  const result = spawnSync('sh', ['-c', command], { cwd: root, encoding: 'utf8', maxBuffer: 1 << 28 });
+  const output = tail(`${result.stdout ?? ''}${result.stderr ?? ''}`, 200);
+  const code = workspace.codeFingerprint(root, item.base);
+  const body = `command: ${command}\ncommit: ${workspace.headCommit(root)}\ncode: ${code}\n\n${output}\n`;
+  if (result.status !== 0) {
+    workspace.removeEvidence(root, item, 'verify.md');
+    workspace.writeEvidence(root, item, 'verify-failed.md', body);
+    throw new SdlcError(`verify failed: ${command}\n${tail(output, 20)}`);
+  }
+  workspace.removeEvidence(root, item, 'verify-failed.md');
+  workspace.writeEvidence(root, item, 'verify.md', body);
+  console.log(`${item.id}: verify passed.`);
   return 0;
 }
 
 function advance(positionals) {
   const root = requireRoot();
-  const item = workspace.activeItem(root, positionals[0]);
+  let item = workspace.activeItem(root, positionals[0]);
+  if (item.stage === 'build') {
+    const review = reviewBuild(root, item, workspace.loadConfig(root));
+    if (review.problems.length > 0) {
+      throw new SdlcError(`can't advance ${item.id}: ${review.problems.join('; ')}`);
+    }
+    if (review.item.track !== item.track) {
+      const event = { track: { from: item.track, to: review.item.track }, from: item.stage, to: review.item.stage };
+      workspace.saveItem(root, record(review.item, event));
+      console.log(`${item.id}: its files need the ${review.item.track} track, so the track was raised.`);
+      item = workspace.loadItem(root, item.id);
+    }
+  }
   const result = machine.advance(item, workspace.readFacts(root, item));
   if (!result.ok) {
     if (!isOpen(item)) throw new SdlcError(`${item.id} is already ${item.stage}`);
     throw new SdlcError(`can't advance ${item.id}: ${machine.describeNext(result.next)}`);
   }
-  workspace.saveItem(root, record(result.item, { from: item.stage, to: result.item.stage }));
+  const event = { from: item.stage, to: result.item.stage, commit: workspace.headCommit(root) };
+  workspace.saveItem(root, record(result.item, event));
   console.log(`${item.id}  ${item.stage} -> ${result.item.stage}`);
   return 0;
 }
@@ -221,6 +273,8 @@ function dispatch(argv) {
     setup,
     new: createNew,
     status,
+    check,
+    verify,
     advance,
     rework,
     track,

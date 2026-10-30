@@ -173,6 +173,15 @@ function setupMarker(root) {
   return file === null ? null : path.resolve(root, file);
 }
 
+// Counts how often one agent has been sent back, in the worktree's git directory.
+function countStopBlock(root, agentId) {
+  const safe = String(agentId).replace(/[^\w-]/g, '_');
+  const file = path.resolve(root, git(root, ['rev-parse', '--git-path', `sdlc-stops-${safe}`]) ?? '.sdlc-stops');
+  const count = (fs.existsSync(file) ? Number(fs.readFileSync(file, 'utf8')) : 0) + 1;
+  fs.writeFileSync(file, String(count));
+  return count;
+}
+
 function isLinkedWorktree(root) {
   const marker = path.join(root, '.git');
   return fs.existsSync(marker) && fs.statSync(marker).isFile();
@@ -244,7 +253,7 @@ function activeItem(root, query) {
   throw new SdlcError(`several open work items, so name one: ${open.map((i) => i.id).join(', ')}`);
 }
 
-function createItem(root, slug, track, stage) {
+function createItem(root, slug, track, stage, files = []) {
   if (!SLUG.test(slug)) {
     throw new SdlcError(`invalid slug '${slug}': use lowercase letters, digits, and hyphens`, 2);
   }
@@ -257,7 +266,8 @@ function createItem(root, slug, track, stage) {
     if (error.code === 'EEXIST') throw new SdlcError(`work item ${id} already exists`);
     throw error;
   }
-  const item = { id, track, stage, branch: currentBranch(root), rework: 0, history: [] };
+  const base = git(root, ['rev-parse', 'HEAD']);
+  const item = { id, track, stage, branch: currentBranch(root), base, files, rework: 0, history: [] };
   saveItem(root, item);
   return item;
 }
@@ -293,6 +303,55 @@ function readTeam(sessionId) {
   return fs.existsSync(file) ? readJson(file, 'the team config') : null;
 }
 
+function headCommit(root) {
+  return git(root, ['rev-parse', 'HEAD']);
+}
+
+function readArtifact(root, item, artifact) {
+  const file = path.join(workDir(root), item.id, artifact);
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+}
+
+const NOT_FACTORY = ':(exclude).sdlc';
+
+// Committed, staged, unstaged, and untracked changes since `base`, so moving work
+// into a commit can't take it out of view.
+function changedFiles(root, base) {
+  if (!base) return [];
+  const tracked = git(root, ['diff', '--name-only', '--no-renames', base, '--', '.', NOT_FACTORY]);
+  const untracked = git(root, ['ls-files', '-o', '--exclude-standard', '--', '.', NOT_FACTORY]);
+  return [...`${tracked ?? ''}\n${untracked ?? ''}`.split('\n').filter(Boolean)].sort();
+}
+
+// Changes when the code changes, so verify evidence can't outlive what it tested.
+// It hashes file contents, so committing the same code doesn't change it.
+function codeFingerprint(root, base) {
+  if (!base) return null;
+  const hash = crypto.createHash('sha256');
+  for (const file of changedFiles(root, base)) hash.update(`${file}\0${sha256(path.join(root, file)) ?? ''}`);
+  return hash.digest('hex');
+}
+
+const FINGERPRINT_LINE = /^code: ([0-9a-f]{64})$/m;
+
+// Evidence from sdlc verify names the code it tested. Once that code changes, or
+// if the line is missing, the evidence no longer counts.
+function verifyIsCurrent(root, item, file) {
+  const expected = codeFingerprint(root, item.base);
+  if (expected === null) return true;
+  return FINGERPRINT_LINE.exec(fs.readFileSync(file, 'utf8'))?.[1] === expected;
+}
+
+function writeEvidence(root, item, name, text) {
+  const file = path.join(workDir(root), item.id, 'evidence', name);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, text);
+}
+
+function removeEvidence(root, item, name) {
+  fs.rmSync(path.join(workDir(root), item.id, 'evidence', name), { force: true });
+}
+
 // Gathers what `nextAction` needs to know about one item from the disk.
 function readFacts(root, item) {
   const dir = path.join(workDir(root), item.id);
@@ -300,7 +359,12 @@ function readFacts(root, item) {
   const approvals = {};
   for (const { stage } of FLOWS[item.track]) {
     const artifact = ARTIFACTS[stage];
-    if (artifact) artifacts[artifact] = sha256(path.join(dir, artifact));
+    if (artifact) {
+      const file = path.join(dir, artifact);
+      const hash = sha256(file);
+      const stale = hash !== null && artifact === ARTIFACTS.verify && !verifyIsCurrent(root, item, file);
+      artifacts[artifact] = stale ? null : hash;
+    }
     approvals[stage] = readApproval(path.join(dir, 'approvals', `${stage}.json`));
   }
   return { artifacts, approvals };
@@ -320,14 +384,21 @@ module.exports = {
   UNREACHABLE_WARNING,
   activeItem,
   archiveEvidence,
+  changedFiles,
+  codeFingerprint,
+  countStopBlock,
   createItem,
   findRoot,
+  headCommit,
   init,
   listIds,
+  removeEvidence,
+  writeEvidence,
   markSetupDone,
   ownItems,
   loadConfig,
   loadItem,
+  readArtifact,
   readFacts,
   readTeam,
   resolveId,
