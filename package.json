@@ -1,0 +1,11 @@
+{
+  "name": "ai-sdlc",
+  "private": true,
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test",
+    "validate": "claude plugin validate --strict . && claude plugin validate --strict plugins/sdlc",
+    "check": "npm test && npm run validate"
+  }
+}
