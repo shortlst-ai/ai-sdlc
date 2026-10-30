@@ -9,3 +9,7 @@ The factory moves each change through committed artifacts (`intent.md`, `spec.md
 - Design: [docs/proposal.md](docs/proposal.md)
 - Roadmap: [milestones](../../milestones)
 - Work: [issues](../../issues)
+
+## License
+
+[MIT](LICENSE)
