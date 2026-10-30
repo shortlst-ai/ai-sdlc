@@ -81,6 +81,11 @@ I built a throwaway plugin and ran it on Haiku, at a cost well under a dollar. A
 | 9 | Does `agentType` keep the role in a workflow? | **Yes**, `fspike:builder` (314) | Always pass `agentType` |
 | 10 | Can the model trigger a `disable-model-invocation` skill? | **No**, and no approval was written (280) | |
 | 11 | Does a typed command fire `UserPromptExpansion`? | **Yes**, the hook wrote the approval (280) | Approval can be recorded outside the model |
+| 12 | Do plugin hooks fire for teammates in a native worktree session? | **Yes**, with the worktree as `cwd` (314) | The stage gate works for a team |
+| 13 | What does a hook see as a teammate's `agent_type`? | **The teammate's name**, such as `bob`, not its role (314) | Role rules silently do nothing for teammates unless the role is looked up |
+| 14 | Can a hook find the role anyway? | **Yes**, from `members[].agentType` in the team config, and it blocked the write (314) | Teammates can be held to role rules |
+| 15 | What happens in a worktree with no `.sdlc/`? | `findRoot` walks up to the main checkout's `.sdlc/` (314) | Path rules see the wrong path. Must stop at the git boundary |
+| 16 | Can tests in a worktree borrow the main `.venv`? | They run, but import the **main checkout's** code (RCTResources) | Each worktree needs its own environment |
 
 Also learned: a skill and a workflow with the same name appear to collide, since calling `fspike:hello` failed until the skill was removed.
 
@@ -126,6 +131,16 @@ Each layer answers a different question, and only the bottom one holds against a
 **Approvals bind to content.** `/sdlc:approve` is human-only (tests 10 and 11). A hook records the SHA-256 of the artifact plus the approver. If the spec changes afterward, the approval no longer matches and the gate reopens. You approve the bytes, not the stage.
 
 **Scope comes from the plan, not from role names.** One stack-neutral `builder` replaces `backend-builder` and `frontend-builder`. `plan.md` declares which files each slice may touch, and `SubagentStop` compares that to the real diff (test 5). This is what makes the factory work on any stack.
+
+**One work item is one branch, one native worktree, and one session with its agent team.** You start a change with `claude --worktree <slug>` in a new terminal. Claude Code creates `.claude/worktrees/<slug>/` on branch `worktree-<slug>`, and the item is created inside that session, so it lives on the branch from the start. Features can't collide, the main checkout stays clean, and hooks check only the current branch's item. The playbook's limit still applies: run only as many of these as you can review.
+
+The session is the team lead, and the factory's roles are teammates spawned from the plugin's agent definitions:
+
+- The lead holds the human gates, because teammates and subagents can't ask you anything.
+- Teammates share the worktree, so `plan.md` must give each builder a file set that doesn't overlap. Passing `isolation` makes a call launch as a plain subagent instead.
+- Teams don't survive `/resume`. The state is in Git, so a resumed lead respawns its teammates.
+- Teams are experimental, off by default, and interactive. `/sdlc:init` turns them on in project settings, and the skills also work with plain subagents, for CI and as a fallback.
+- Teammates cost more tokens than subagents and suit parallel work best. Whether `quick` needs a team at all is worth measuring in Phase 2.
 
 **Hooks stay fast.** Formatters run per file. The full test suite runs at `SubagentStop` for builders, not on every `Stop`, since that fires every turn. Every blocking loop has a retry budget, then escalates to a human.
 
@@ -276,7 +291,7 @@ Effort figures are rough, for one person working with Claude.
 | Phase | Scope | Exit criteria | Effort |
 | --- | --- | --- | --- |
 | **0. Foundation** | Marketplace skeleton, `sdlc` CLI and state machine, hook fixture tests. Capture a baseline on the target repo | CLI tests pass; `claude plugin validate --strict` passes; baseline recorded | 2-3 days |
-| **1. Core loop** | `standard` track, intent to PR, approvals, scope check, `sdlc-gates.yml` | 3 real changes completed on `RCTResources` through the local gates; a deliberate gate bypass is caught by CI on this repo | 1-2 weeks |
+| **1. Core loop** | Native worktree sessions with agent teams, `standard` track from intent to PR, scope check, `sdlc-gates.yml` | 3 real changes completed on `RCTResources` through the local gates; a deliberate gate bypass is caught by CI on this repo | 1-2 weeks |
 | **2. Tracks and learning** | `quick` and `critical` tracks, review integration, `/sdlc:learn`, evals, metrics | A small fix takes under 15 minutes of human time; eval suite runs in CI | 1-2 weeks |
 | **3. Deploy** | Environment tiers, release authorization, rehearsed rollback | Agent can reach production's gate and cannot pass it, proven by test | 1-2 weeks |
 | **4. Maintain** | `bands.yaml`, detection on CI failure rate, intent-writing diagnoser | A real breach becomes an intent PR with no human starting it | 1-2 weeks |
@@ -312,12 +327,15 @@ All of these come from Git, the PR history, and CI.
 | Hook latency in every session | Immediate exit without `.sdlc/`; hooks kept fast and measured |
 | Infinite block loops at `SubagentStop` | Retry budget, then escalate |
 | Claude Code's plugin surface changes quickly (`experimental.evals`, `experimental.monitors`) | Pin a minimum version; keep logic in the CLI, not in platform features |
+| Agent teams are experimental, and role lookup reads their runtime config | Keep the skills working with plain subagents; pin the config format with a test |
+| Two teammates editing one file overwrite each other | `plan.md` assigns non-overlapping file sets, and the scope check enforces them |
 | Node isn't guaranteed on every machine | Declare it as a prerequisite and have `/sdlc:init` check for it |
 | With 0 required approvals, an agent with merge rights could merge its own PR | Keep merge rights away from agents; raise the count when a second reviewer joins |
 
 **Not yet tested:**
 
-- Hooks inside `isolation: worktree` agents, and whether diff checks see those changes correctly
+- Split-pane teammates (only in-process teammates were tested)
+- The `sdlc` plugin's own hooks with real `sdlc:` roles in a team
 - Whether an agent can defeat the check by committing out-of-scope work (the check must compare against the branch base, not just the working tree)
 - `plugin eval` on this plugin's gates, since no suite exists yet
 - Coexistence with Superpowers
@@ -340,6 +358,8 @@ Settled on 2026-10-30:
 4. **Dogfood repo:** `RCTResources`, a Python 3.12 data pipeline with pytest, ruff, and mypy. It stays local, with no GitHub remote for now.
 5. **Project management:** this repo lives on GitHub, with phases as milestones and work as issues.
 6. **Branch protection:** this repo is public, because the `shortlst-ai` account can't use branch protection on private repos. `main` requires a PR for everyone, including admins, and blocks force-pushes and deletion. Required approvals are 0, because GitHub doesn't let an author approve their own PR. A second reviewer can raise this later.
+7. **Execution model:** Claude Code's native worktrees, not hand-managed `git worktree`, with one session and agent team per work item.
+8. **Worktree environments:** each worktree builds its own through `commands.setup`, because a shared `.venv` tests the wrong code.
 
 ### What a local dogfood repo changes
 
