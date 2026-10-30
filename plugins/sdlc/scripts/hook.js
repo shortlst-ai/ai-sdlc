@@ -48,7 +48,7 @@ function preEdit(root, input) {
   if (file === null) return;
   const decision = checkEdit({
     file,
-    role: roleOf(input.agent_type),
+    role: roleOf(input.agent_type, workspace.readTeam(input.session_id)),
     items: openItems(root),
     config: workspace.loadConfig(root),
   });

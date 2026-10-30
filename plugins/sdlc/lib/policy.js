@@ -26,10 +26,18 @@ const ROLE_SCOPES = {
   researcher: READ_ONLY,
   reviewer: READ_ONLY,
   diagnoser: READ_ONLY,
+  unassigned: READ_ONLY,
 };
 
-function roleOf(agentType) {
-  return agentType?.startsWith('sdlc:') ? agentType.slice('sdlc:'.length) : null;
+// A teammate's hooks report its name as `agent_type`, and the role is only in the
+// team config, so that's checked first. That order also stops a teammate from
+// claiming a role through its name. In a team, anything without an sdlc role
+// can't write, because falling back to the lead's rights would fail open.
+function roleOf(agentType, team) {
+  const member = team?.members?.find(({ name }) => name === agentType);
+  const type = member ? member.agentType : agentType;
+  if (type?.startsWith('sdlc:')) return type.slice('sdlc:'.length);
+  return team && agentType ? 'unassigned' : null;
 }
 
 // A gate from an earlier stage that reopened stops all work until it's resolved.

@@ -141,6 +141,79 @@ test('pre-edit applies the role from agent_type', (t) => {
   assert.match(result.stderr, /reviewer role/);
 });
 
+function configDir(t, members) {
+  const home = tempDir(t);
+  const team = path.join(home, 'teams', 'session-be843abc');
+  fs.mkdirSync(team, { recursive: true });
+  const config = members === null ? '{ nope' : JSON.stringify({ name: 'session-be843abc', members });
+  fs.writeFileSync(path.join(team, 'config.json'), config);
+  return home;
+}
+
+function teammateEdit(cwd, home, file, name) {
+  const input = {
+    cwd,
+    session_id: 'be843abc-1111-2222-3333-444444444444',
+    agent_type: name,
+    tool_name: 'Write',
+    tool_input: { file_path: file },
+  };
+  return spawnSync('node', [HOOK, 'pre-edit'], {
+    input: JSON.stringify(input),
+    encoding: 'utf8',
+    env: { ...env(), CLAUDE_CONFIG_DIR: home },
+  });
+}
+
+test('a teammate is held to the role in the team config', (t) => {
+  const cwd = factory(t);
+  atBuild(cwd);
+  const home = configDir(t, [
+    { name: 'bob', agentType: 'sdlc:builder' },
+    { name: 'rita', agentType: 'sdlc:reviewer' },
+  ]);
+  assert.equal(teammateEdit(cwd, home, 'src/a.py', 'bob').status, 0);
+  const refused = teammateEdit(cwd, home, 'src/a.py', 'rita');
+  assert.equal(refused.status, 2);
+  assert.match(refused.stderr, /reviewer role/);
+});
+
+test('a teammate outside our roles can\'t write', (t) => {
+  const cwd = factory(t);
+  atBuild(cwd);
+  const home = configDir(t, [{ name: 'sam', agentType: 'general-purpose' }]);
+  const refused = teammateEdit(cwd, home, 'src/a.py', 'sam');
+  assert.equal(refused.status, 2);
+  assert.match(refused.stderr, /unassigned role/);
+});
+
+test('an unreadable team config fails closed', (t) => {
+  const cwd = factory(t);
+  atBuild(cwd);
+  const refused = teammateEdit(cwd, configDir(t, null), 'src/a.py', 'bob');
+  assert.equal(refused.status, 2);
+  assert.match(refused.stderr, /can't check this action/);
+});
+
+test('no team config means no team', (t) => {
+  const cwd = factory(t);
+  atBuild(cwd);
+  assert.equal(teammateEdit(cwd, tempDir(t), 'src/a.py', 'Explore').status, 0);
+});
+
+test('a session id can\'t steer the path to the team config', (t) => {
+  const cwd = factory(t);
+  atBuild(cwd);
+  const home = configDir(t, [{ name: 'sam', agentType: 'general-purpose' }]);
+  const input = { cwd, session_id: '../../etc', agent_type: 'sam', tool_input: { file_path: 'src/a.py' } };
+  const result = spawnSync('node', [HOOK, 'pre-edit'], {
+    input: JSON.stringify(input),
+    encoding: 'utf8',
+    env: { ...env(), CLAUDE_CONFIG_DIR: home },
+  });
+  assert.equal(result.status, 0);
+});
+
 test('corrupt state fails closed in the factory', (t) => {
   const cwd = factory(t);
   sdlc(cwd, 'new', 'feature');

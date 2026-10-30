@@ -5,6 +5,7 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const { ARTIFACTS, DONE, FLOWS, isValidItem } = require('./machine');
@@ -214,6 +215,15 @@ function saveApproval(root, item, record) {
   saveItem(root, { ...item, history: [...item.history, event] });
 }
 
+// The team config is where Claude Code records each teammate's agent type. It
+// exists only while a team is running, so a missing file means no team.
+function readTeam(sessionId) {
+  if (!/^[\w-]+$/.test(sessionId ?? '')) return null;
+  const home = process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude');
+  const file = path.join(home, 'teams', `session-${sessionId.slice(0, 8)}`, 'config.json');
+  return fs.existsSync(file) ? readJson(file, 'the team config') : null;
+}
+
 // Gathers what `nextAction` needs to know about one item from the disk.
 function readFacts(root, item) {
   const dir = path.join(workDir(root), item.id);
@@ -248,6 +258,7 @@ module.exports = {
   loadConfig,
   loadItem,
   readFacts,
+  readTeam,
   resolveId,
   saveApproval,
   saveItem,

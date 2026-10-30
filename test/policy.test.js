@@ -40,6 +40,45 @@ describe('roles', () => {
       assert.equal(roleOf(type), null);
     }
   });
+
+  const team = {
+    members: [
+      { name: 'team-lead', agentType: 'team-lead' },
+      { name: 'bob', agentType: 'sdlc:builder' },
+      { name: 'rita', agentType: 'sdlc:reviewer' },
+      { name: 'sam', agentType: 'general-purpose' },
+      { name: 'pat' },
+      { name: 'sdlc:builder', agentType: 'sdlc:reviewer' },
+    ],
+  };
+
+  test('a teammate\'s role comes from the team config', () => {
+    assert.equal(roleOf('bob', team), 'builder');
+    assert.equal(roleOf('rita', team), 'reviewer');
+  });
+
+  test('the lead has no agent_type and stays unrestricted', () => {
+    assert.equal(roleOf(undefined, team), null);
+  });
+
+  test('a subagent spawned inside a team keeps its sdlc role', () => {
+    assert.equal(roleOf('sdlc:verifier', team), 'verifier');
+  });
+
+  test('a teammate outside our roles gets no write access', () => {
+    assert.equal(roleOf('sam', team), 'unassigned');
+    assert.equal(roleOf('pat', team), 'unassigned');
+    denied(edit('src/a.py', { role: 'unassigned' }), /can't change files/);
+  });
+
+  test('an agent that isn\'t a member gets no write access in a team', () => {
+    assert.equal(roleOf('ghost', team), 'unassigned');
+    assert.equal(roleOf('general-purpose', team), 'unassigned');
+  });
+
+  test('a name can\'t claim a role it wasn\'t given', () => {
+    assert.equal(roleOf('sdlc:builder', team), 'reviewer');
+  });
 });
 
 describe('managed and protected files', () => {
