@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "commands": {
+    "setup": null,
+    "verify": "true",
+    "format": null
+  },
+  "tracks": {
+    "critical": {
+      "paths": []
+    },
+    "quick": {
+      "max_files": 3
+    }
+  },
+  "protected": [],
+  "tests": [
+    "test/**",
+    "tests/**",
+    "**/*.test.*",
+    "**/*.spec.*",
+    "**/*_test.*",
+    "**/test_*.*"
+  ],
+  "limits": {
+    "rework": 3
+  }
+}
