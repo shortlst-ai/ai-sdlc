@@ -1,0 +1,17 @@
+{
+  "name": "ai-sdlc",
+  "description": "An AI-native software factory for the whole development lifecycle",
+  "owner": {
+    "name": "Xinming An",
+    "url": "https://github.com/shortlst-ai"
+  },
+  "plugins": [
+    {
+      "name": "sdlc",
+      "source": "./plugins/sdlc",
+      "description": "Moves each change through committed artifacts and gates, from intent to production",
+      "category": "development",
+      "tags": ["sdlc", "workflow", "governance"]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "sdlc",
+  "version": "0.1.0",
+  "description": "Moves each change through committed artifacts and gates, from intent to production",
+  "author": {
+    "name": "Xinming An",
+    "url": "https://github.com/shortlst-ai"
+  },
+  "repository": "https://github.com/shortlst-ai/ai-sdlc",
+  "license": "MIT",
+  "keywords": ["sdlc", "workflow", "governance"]
+}
