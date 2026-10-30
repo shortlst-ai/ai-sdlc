@@ -6,6 +6,7 @@ const path = require('node:path');
 const { parseArgs } = require('node:util');
 
 const { reviewBuild } = require('./check');
+const { runGates } = require('./gates');
 const machine = require('./machine');
 const { collect } = require('./metrics');
 const workspace = require('./workspace');
@@ -29,6 +30,7 @@ Commands:
   rework [<id>] --reason <text>      Send verify or review back to build
   track [<id>] [<track>] [--files a,b]
                                      Raise a track. Tracks can never be lowered
+  gates --base <ref> [--json]        Recheck every gate, for CI
   metrics [--since <date>] [--json]  Summarize delivery from Git history
   --version                          Print the plugin version
   --help                             Print this help
@@ -41,6 +43,7 @@ const OPTIONS = {
   track: { type: 'string' },
   reason: { type: 'string' },
   since: { type: 'string' },
+  base: { type: 'string' },
   setup: { type: 'string' },
   verify: { type: 'string' },
   format: { type: 'string' },
@@ -250,6 +253,17 @@ function setup() {
   return 0;
 }
 
+// Exit 1 here is what fails the required check.
+function gates(positionals, values) {
+  if (!values.base) throw new SdlcError('sdlc gates needs --base', 2);
+  const result = runGates(process.cwd(), values.base);
+  if (values.json) console.log(JSON.stringify(result));
+  else if (!result.factory) console.log('This repo does not use the factory.');
+  else if (result.problems.length === 0) console.log(`Gates passed for ${result.items.length} work items.`);
+  else for (const problem of result.problems) console.error(`sdlc: ${problem}`);
+  return result.problems.length === 0 ? 0 : 1;
+}
+
 function metrics(positionals, values) {
   const summary = collect(process.cwd(), values.since);
   if (values.json) {
@@ -300,6 +314,7 @@ function dispatch(argv) {
     advance,
     rework,
     track,
+    gates,
     metrics,
   };
   if (!Object.hasOwn(commands, command)) {

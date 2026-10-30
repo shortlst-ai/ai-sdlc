@@ -116,12 +116,20 @@ function assertConfig(config) {
   if (!valid) throw new SdlcError(`${SDLC_DIR}/config.json doesn't match the expected shape`);
 }
 
-function loadConfig(root) {
-  const file = path.join(root, SDLC_DIR, 'config.json');
-  if (!fs.existsSync(file)) return DEFAULT_CONFIG;
-  const config = readJson(file, `${SDLC_DIR}/config.json`);
+function parseConfig(text) {
+  let config;
+  try {
+    config = JSON.parse(text);
+  } catch (error) {
+    throw new SdlcError(`can't read ${SDLC_DIR}/config.json: ${error.message}`);
+  }
   assertConfig(config);
   return config;
+}
+
+function loadConfig(root) {
+  const file = path.join(root, SDLC_DIR, 'config.json');
+  return fs.existsSync(file) ? parseConfig(fs.readFileSync(file, 'utf8')) : DEFAULT_CONFIG;
 }
 
 function git(root, args) {
@@ -407,6 +415,7 @@ module.exports = {
   removeEvidence,
   writeEvidence,
   markSetupDone,
+  parseConfig,
   ownItems,
   loadConfig,
   loadItem,

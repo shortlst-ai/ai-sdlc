@@ -4,7 +4,7 @@
 // the diff rather than watching edits, because Bash can reach around any edit
 // hook, and a diff can't be dodged by committing the work.
 
-const { classify, matchesAny, raiseTrack, trackRank } = require('./machine');
+const { classify, isOpen, matchesAny, raiseTrack, trackRank } = require('./machine');
 const workspace = require('./workspace');
 
 const SCOPE_BLOCK = /^```scope[^\n]*\n([\s\S]*?)^```/gm;
@@ -40,7 +40,8 @@ function reviewBuild(root, item, config) {
   // With nothing changed there's nothing to classify, and classify's default for
   // no files would wrongly raise a quick item.
   const needed = changed.length > 0 ? classify(changed, config) : item.track;
-  const raised = trackRank(needed) > trackRank(item.track) ? raiseTrack(item, needed).item : item;
+  const shouldRaise = isOpen(item) && trackRank(needed) > trackRank(item.track);
+  const raised = shouldRaise ? raiseTrack(item, needed).item : item;
 
   const scope = scopeFor(raised, workspace.readArtifact(root, raised, 'plan.md'));
   if (scope.length === 0 && item.base) {
