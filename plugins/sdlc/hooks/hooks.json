@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "UserPromptExpansion": [
+      {
+        "matcher": "sdlc:approve",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/on-approve.js"],
+            "onFailure": "block"
+          }
+        ]
+      }
+    ]
+  }
+}

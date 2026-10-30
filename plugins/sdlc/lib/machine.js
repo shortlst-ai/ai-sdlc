@@ -129,6 +129,21 @@ function nextAction(item, facts) {
   return { action: 'advance', to: following ? following.stage : DONE };
 }
 
+function describeNext(next) {
+  switch (next.action) {
+    case 'produce':
+      return `write ${next.artifact} for the ${next.stage} stage`;
+    case 'approve':
+      return next.stale
+        ? `${next.artifact} changed after approval, so ${next.stage} needs approving again`
+        : `a person must approve ${next.stage}`;
+    case 'advance':
+      return `advance to ${next.to}`;
+    default:
+      return 'nothing, this item is done';
+  }
+}
+
 function advance(item, facts) {
   const next = nextAction(item, facts);
   if (next.action !== 'advance') return { ok: false, next };
@@ -169,6 +184,7 @@ module.exports = {
   TRACKS,
   advance,
   classify,
+  describeNext,
   firstStage,
   isValidItem,
   matchesAny,
