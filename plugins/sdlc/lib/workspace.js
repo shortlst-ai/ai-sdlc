@@ -3,6 +3,7 @@
 // Everything that touches the disk: finding the repo, reading config, and
 // reading and writing work items.
 
+const { execFileSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -15,12 +16,15 @@ const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 const DEFAULT_CONFIG = {
   version: 1,
-  commands: { verify: null, format: null },
+  commands: { setup: null, verify: null, format: null },
   tracks: { critical: { paths: [] }, quick: { max_files: 3 } },
   protected: [],
   tests: ['test/**', 'tests/**', '**/*.test.*', '**/*.spec.*', '**/*_test.*', '**/test_*.*'],
   limits: { rework: 3 },
 };
+
+const AGENT_TEAMS_FLAG = 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS';
+const WORKTREES_IGNORE = '.claude/worktrees/';
 
 const UNREACHABLE_WARNING =
   'This worktree has no .sdlc/, so the factory gates are off here. The main checkout ' +
@@ -119,13 +123,71 @@ function loadConfig(root) {
   return config;
 }
 
+function git(root, args) {
+  try {
+    const options = { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] };
+    return execFileSync('git', args, options).trim();
+  } catch {
+    return null;
+  }
+}
+
+// Null outside a repo or before the first commit, where work can't be tied to a branch.
+function currentBranch(root) {
+  return git(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
+}
+
+function ignoreWorktrees(root) {
+  const file = path.join(root, '.gitignore');
+  const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  if (existing.split('\n').includes(WORKTREES_IGNORE)) return;
+  const separator = existing === '' || existing.endsWith('\n') ? '' : '\n';
+  fs.writeFileSync(file, `${existing}${separator}${WORKTREES_IGNORE}\n`);
+}
+
+// A plugin can't ship settings, so the project has to turn agent teams on itself.
+function enableAgentTeams(root) {
+  const dir = path.join(root, '.claude');
+  const file = path.join(dir, 'settings.json');
+  const settings = fs.existsSync(file) ? readJson(file, '.claude/settings.json') : {};
+  if (settings.env?.[AGENT_TEAMS_FLAG] === '1') return;
+  fs.mkdirSync(dir, { recursive: true });
+  writeJson(file, { ...settings, env: { ...settings.env, [AGENT_TEAMS_FLAG]: '1' } });
+}
+
 function init(cwd) {
   const existing = findRoot(cwd);
   if (existing) throw new SdlcError(`factory already initialized at ${existing}`);
-  const root = path.resolve(cwd);
+  const root = gitTop(cwd) ?? path.resolve(cwd);
+  enableAgentTeams(root);
+  ignoreWorktrees(root);
   fs.mkdirSync(workDir(root), { recursive: true });
   writeJson(path.join(root, SDLC_DIR, 'config.json'), DEFAULT_CONFIG);
   return root;
+}
+
+// Kept in the worktree's own git directory, so it never gets committed and each
+// worktree tracks its own setup. Recording the command reruns setup if it changes.
+function setupMarker(root) {
+  const file = git(root, ['rev-parse', '--git-path', 'sdlc-setup']);
+  return file === null ? null : path.resolve(root, file);
+}
+
+function isLinkedWorktree(root) {
+  const marker = path.join(root, '.git');
+  return fs.existsSync(marker) && fs.statSync(marker).isFile();
+}
+
+function setupPending(root) {
+  const command = loadConfig(root).commands?.setup;
+  if (!command || !isLinkedWorktree(root)) return false;
+  const marker = setupMarker(root);
+  return marker !== null && (!fs.existsSync(marker) || fs.readFileSync(marker, 'utf8') !== command);
+}
+
+function markSetupDone(root, command) {
+  const marker = setupMarker(root);
+  if (marker !== null) fs.writeFileSync(marker, command);
 }
 
 function loadItem(root, id) {
@@ -163,15 +225,22 @@ function resolveId(root, query) {
   throw new SdlcError(`no work item '${query}'`);
 }
 
+// A work item belongs to the branch it was created on, so each worktree session
+// sees only its own work. An item with no branch was made outside git.
+function ownItems(root) {
+  const branch = currentBranch(root);
+  return listIds(root)
+    .map((id) => loadItem(root, id))
+    .filter((item) => !item.branch || item.branch === branch);
+}
+
 // With no id given, the single open item is the active one. Choosing between
 // several is left to the caller rather than guessed at here.
 function activeItem(root, query) {
   if (query) return loadItem(root, resolveId(root, query));
-  const open = listIds(root)
-    .map((id) => loadItem(root, id))
-    .filter((item) => item.stage !== DONE);
+  const open = ownItems(root).filter((item) => item.stage !== DONE);
   if (open.length === 1) return open[0];
-  if (open.length === 0) throw new SdlcError('no open work items');
+  if (open.length === 0) throw new SdlcError('no open work items on this branch');
   throw new SdlcError(`several open work items, so name one: ${open.map((i) => i.id).join(', ')}`);
 }
 
@@ -188,7 +257,7 @@ function createItem(root, slug, track, stage) {
     if (error.code === 'EEXIST') throw new SdlcError(`work item ${id} already exists`);
     throw error;
   }
-  const item = { id, track, stage, rework: 0, history: [] };
+  const item = { id, track, stage, branch: currentBranch(root), rework: 0, history: [] };
   saveItem(root, item);
   return item;
 }
@@ -255,6 +324,8 @@ module.exports = {
   findRoot,
   init,
   listIds,
+  markSetupDone,
+  ownItems,
   loadConfig,
   loadItem,
   readFacts,
@@ -262,5 +333,6 @@ module.exports = {
   resolveId,
   saveApproval,
   saveItem,
+  setupPending,
   unreachableFactory,
 };

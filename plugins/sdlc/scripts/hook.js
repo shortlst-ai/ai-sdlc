@@ -19,8 +19,7 @@ function refuse(reason) {
 
 function openItems(root) {
   return workspace
-    .listIds(root)
-    .map((id) => workspace.loadItem(root, id))
+    .ownItems(root)
     .filter((item) => item.stage !== machine.DONE)
     .map((item) => {
       const next = machine.nextAction(item, workspace.readFacts(root, item));
@@ -98,6 +97,9 @@ function postEdit(root, input) {
 }
 
 function sessionStart(root) {
+  if (workspace.setupPending(root)) {
+    console.log('This worktree has no environment yet. Run `sdlc setup` before building or testing.');
+  }
   const open = openItems(root);
   if (open.length === 0) return;
   console.log('Open sdlc work items:');

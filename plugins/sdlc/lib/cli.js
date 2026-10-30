@@ -1,5 +1,6 @@
 'use strict';
 
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const { parseArgs } = require('node:util');
@@ -14,7 +15,8 @@ const { SdlcError } = workspace;
 const USAGE = `Usage: sdlc <command>
 
 Commands:
-  init                               Set up the factory in this directory
+  init                               Set up the factory in this repo
+  setup                              Build this worktree's environment
   new <slug> [--files a,b] [--track T]
                                      Start a work item. Files decide the track
   status [<id>] [--json]             Show work items and the next action
@@ -82,10 +84,10 @@ function status(positionals, values) {
     }
     return 0;
   }
-  const ids = positionals[0]
-    ? [workspace.resolveId(root, positionals[0])]
-    : workspace.listIds(root);
-  const items = ids.map((id) => describe(root, workspace.loadItem(root, id)));
+  const loaded = positionals[0]
+    ? [workspace.loadItem(root, workspace.resolveId(root, positionals[0]))]
+    : workspace.ownItems(root);
+  const items = loaded.map((item) => describe(root, item));
   const next = repoNext(items);
   if (values.json) {
     console.log(JSON.stringify({ initialized: true, root, items, next }));
@@ -168,6 +170,20 @@ function track(positionals, values) {
   return 0;
 }
 
+function setup() {
+  const root = requireRoot();
+  const command = workspace.loadConfig(root).commands?.setup;
+  if (!command) {
+    console.log('No setup command in .sdlc/config.json, so nothing to do.');
+    return 0;
+  }
+  const result = spawnSync('sh', ['-c', command], { cwd: root, stdio: 'inherit' });
+  if (result.status !== 0) throw new SdlcError(`setup failed: ${command}`);
+  workspace.markSetupDone(root, command);
+  console.log('Setup finished.');
+  return 0;
+}
+
 function metrics(positionals, values) {
   const summary = collect(process.cwd(), values.since);
   if (values.json) {
@@ -202,6 +218,7 @@ function dispatch(argv) {
       console.log(`Factory initialized at ${workspace.init(process.cwd())}`);
       return 0;
     },
+    setup,
     new: createNew,
     status,
     advance,

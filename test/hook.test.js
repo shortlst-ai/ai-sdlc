@@ -204,8 +204,10 @@ test('no team config means no team', (t) => {
 test('a session id can\'t steer the path to the team config', (t) => {
   const cwd = factory(t);
   atBuild(cwd);
-  const home = configDir(t, [{ name: 'sam', agentType: 'general-purpose' }]);
-  const input = { cwd, session_id: '../../etc', agent_type: 'sam', tool_input: { file_path: 'src/a.py' } };
+  // Without the check, this id climbs out of teams/ to a config planted in the home folder.
+  const home = configDir(t, []);
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ members: [] }));
+  const input = { cwd, session_id: 'a/../../', agent_type: 'sam', tool_input: { file_path: 'src/a.py' } };
   const result = spawnSync('node', [HOOK, 'pre-edit'], {
     input: JSON.stringify(input),
     encoding: 'utf8',
