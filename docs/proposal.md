@@ -215,6 +215,7 @@ CLAUDE.md   REVIEW.md   .github/workflows/sdlc-*.yml
     "quick": { "max_files": 3 }
   },
   "protected": ["src/gen/**"],
+  "tests": ["tests/**", "**/test_*.py"],
   "limits": { "rework": 3 }
 }
 ```
@@ -238,7 +239,7 @@ The config is JSON, not YAML. Node has no built-in YAML parser, and a hand-writt
 | Event | Purpose |
 | --- | --- |
 | `SessionStart` | Show the active work item; exit at once if there's no `.sdlc/` |
-| `PreToolUse` Write/Edit | Block source edits before G3, protected paths, and agent writes to `approvals/` and `state.json` |
+| `PreToolUse` Write/Edit | Allow source edits only during build, so a change after verify needs rework. Block protected paths and agent writes to `approvals/`, `state.json`, and the config |
 | `PreToolUse` Bash | Block `git push` to main, `--no-verify`, `gh pr merge`, and staged secrets. Best effort, backed by CI |
 | `PostToolUse` Write/Edit | Run the formatter on the changed file |
 | `SubagentStop` builder | Compare the diff to plan scope, run verify, block with the reason, retry within budget |

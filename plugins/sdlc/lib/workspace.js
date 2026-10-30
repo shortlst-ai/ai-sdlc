@@ -17,6 +17,7 @@ const DEFAULT_CONFIG = {
   commands: { verify: null, format: null },
   tracks: { critical: { paths: [] }, quick: { max_files: 3 } },
   protected: [],
+  tests: ['test/**', 'tests/**', '**/*.test.*', '**/*.spec.*', '**/*_test.*', '**/test_*.*'],
   limits: { rework: 3 },
 };
 
@@ -73,6 +74,7 @@ function assertConfig(config) {
     Array.isArray(config.tracks?.critical?.paths) &&
     Number.isInteger(config.tracks?.quick?.max_files) &&
     Array.isArray(config.protected) &&
+    Array.isArray(config.tests) &&
     Number.isInteger(config.limits?.rework);
   if (!valid) throw new SdlcError(`${SDLC_DIR}/config.json doesn't match the expected shape`);
 }
