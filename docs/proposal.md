@@ -303,7 +303,7 @@ Stop after Phase 2 and review the metrics. If the factory isn't beating the base
 
 ## 8. How we'll know it works
 
-All of these come from Git, the PR history, and CI.
+All of these come from Git, the PR history, and CI. `sdlc metrics` reports the Git-based ones, and the [RCTResources baseline](baselines/rctresources-2026-10-30.md) records where they started and which ones have no "before".
 
 | Question | Metric | Warning sign |
 | --- | --- | --- |

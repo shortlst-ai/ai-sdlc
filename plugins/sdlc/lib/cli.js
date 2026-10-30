@@ -5,6 +5,7 @@ const path = require('node:path');
 const { parseArgs } = require('node:util');
 
 const machine = require('./machine');
+const { collect } = require('./metrics');
 const workspace = require('./workspace');
 
 const { DONE, TRACKS } = machine;
@@ -21,6 +22,7 @@ Commands:
   rework [<id>] --reason <text>      Send verify or review back to build
   track [<id>] [<track>] [--files a,b]
                                      Raise a track. Tracks can never be lowered
+  metrics [--since <date>] [--json]  Summarize delivery from Git history
   --version                          Print the plugin version
   --help                             Print this help
 
@@ -31,6 +33,7 @@ const OPTIONS = {
   files: { type: 'string' },
   track: { type: 'string' },
   reason: { type: 'string' },
+  since: { type: 'string' },
 };
 
 function requireRoot() {
@@ -159,6 +162,20 @@ function track(positionals, values) {
   return 0;
 }
 
+function metrics(positionals, values) {
+  const summary = collect(process.cwd(), values.since);
+  if (values.json) {
+    console.log(JSON.stringify(summary));
+    return 0;
+  }
+  const { period, commits, size, signals } = summary;
+  console.log(`${commits.total} commits over ${period.span_days} days, ${period.active_days} active`);
+  console.log(`Median change: ${size.median_files} files, ${size.median_lines} lines`);
+  console.log(`Fix commits: ${signals.fix_commits}. Reverts: ${signals.reverts}.`);
+  console.log(`Commits touching tests: ${signals.touching_tests}`);
+  return 0;
+}
+
 function version() {
   const manifest = path.join(__dirname, '..', '.claude-plugin', 'plugin.json');
   return JSON.parse(fs.readFileSync(manifest, 'utf8')).version;
@@ -184,6 +201,7 @@ function dispatch(argv) {
     advance,
     rework,
     track,
+    metrics,
   };
   if (!Object.hasOwn(commands, command)) {
     throw new SdlcError(`unknown command '${command}'\n\n${USAGE}`, 2);
