@@ -1,61 +1,6 @@
 #!/usr/bin/env node
 'use strict';
 
-const fs = require('node:fs');
-const path = require('node:path');
+const { run } = require('../lib/cli');
 
-const USAGE = `Usage: sdlc <command>
-
-Commands:
-  status [--json]   Show the factory state of the current repo
-  --version         Print the plugin version
-  --help            Print this help`;
-
-function version() {
-  const manifest = path.join(__dirname, '..', '.claude-plugin', 'plugin.json');
-  return JSON.parse(fs.readFileSync(manifest, 'utf8')).version;
-}
-
-// Walks up from the working directory, so the CLI works from any subfolder.
-function findRoot(start) {
-  let dir = path.resolve(start);
-  for (;;) {
-    if (fs.existsSync(path.join(dir, '.sdlc'))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
-function status(args) {
-  const root = findRoot(process.cwd());
-  const result = { initialized: root !== null, root };
-  if (args.includes('--json')) {
-    console.log(JSON.stringify(result));
-  } else if (root) {
-    console.log(`Factory initialized at ${root}`);
-  } else {
-    console.log('This repo does not use the factory: no .sdlc/ directory found.');
-  }
-  return 0;
-}
-
-function main(argv) {
-  const [command, ...args] = argv;
-  switch (command) {
-    case 'status':
-      return status(args);
-    case '--version':
-      console.log(version());
-      return 0;
-    case '--help':
-    case undefined:
-      console.log(USAGE);
-      return 0;
-    default:
-      console.error(`sdlc: unknown command '${command}'\n\n${USAGE}`);
-      return 2;
-  }
-}
-
-process.exitCode = main(process.argv.slice(2));
+process.exitCode = run(process.argv.slice(2));

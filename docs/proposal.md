@@ -151,7 +151,7 @@ Each layer answers a different question, and only the bottom one holds against a
 
 ### Tracks, to keep ceremony in proportion
 
-The track comes from `.sdlc/config.yaml` path rules, not from the model's judgment. The model may raise the track but never lower it.
+The track comes from `.sdlc/config.json` path rules, not from the model's judgment. The model may raise the track but never lower it.
 
 | Track | For | Stages | Human gates |
 | --- | --- | --- | --- |
@@ -173,7 +173,8 @@ ai-sdlc/                         this repo: a marketplace holding the plugin
 ├── docs/proposal.md
 └── plugins/sdlc/
     ├── .claude-plugin/plugin.json
-    ├── bin/sdlc                 state machine, gates, metrics (Node, no dependencies)
+    ├── bin/sdlc                 CLI entry point (Node, no dependencies)
+    ├── lib/                     state machine, gates, metrics
     ├── skills/
     │   ├── init/  next/  status/       setup and orchestration
     │   ├── intent/  spec/  plan/       Plan and Design stages
@@ -195,7 +196,7 @@ Skill and workflow names must not overlap (section 3).
 
 ```text
 .sdlc/
-├── config.yaml                  commands, tracks, protected paths, limits
+├── config.json                  commands, tracks, protected paths, limits
 ├── bands.yaml                   maintain-stage control bands (later phase)
 └── work/0042-claims-status/
     ├── intent.md  spec.md  plan.md
@@ -205,18 +206,20 @@ Skill and workflow names must not overlap (section 3).
 CLAUDE.md   REVIEW.md   .github/workflows/sdlc-*.yml
 ```
 
-```yaml
-# .sdlc/config.yaml
-version: 1
-commands:
-  verify: make test
-  format: "make fmt FILE={file}"
-tracks:
-  critical: { paths: ["src/auth/**", "migrations/**"] }
-  quick:    { max_files: 3 }
-protected: ["src/gen/**"]
-limits: { builder_retries: 3 }
+```json
+{
+  "version": 1,
+  "commands": { "verify": "make test", "format": "make fmt FILE={file}" },
+  "tracks": {
+    "critical": { "paths": ["src/auth/**", "migrations/**"] },
+    "quick": { "max_files": 3 }
+  },
+  "protected": ["src/gen/**"],
+  "limits": { "rework": 3 }
+}
 ```
+
+The config is JSON, not YAML. Node has no built-in YAML parser, and a hand-written or third-party one is a poor fit for a dependency-free CLI reading the file that defines protected paths, where a silent misparse would weaken a rule.
 
 ### Agents
 
