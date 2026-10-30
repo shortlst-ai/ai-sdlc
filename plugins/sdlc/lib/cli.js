@@ -16,11 +16,13 @@ const { SdlcError } = workspace;
 const USAGE = `Usage: sdlc <command>
 
 Commands:
-  init                               Set up the factory in this repo
+  init [--setup C] [--verify C] [--format C] [--critical a,b] [--protected a,b]
+                                     Set up the factory in this repo
   setup                              Build this worktree's environment
   new <slug> [--files a,b] [--track T]
                                      Start a work item. Files decide the track
   status [<id>] [--json]             Show work items and the next action
+  changed [<id>]                     List the files this item has changed
   check [<id>]                       Compare the real diff to the plan's scope
   verify [<id>]                      Run the verify command and record evidence
   advance [<id>]                     Move to the next stage if its gate passes
@@ -39,6 +41,11 @@ const OPTIONS = {
   track: { type: 'string' },
   reason: { type: 'string' },
   since: { type: 'string' },
+  setup: { type: 'string' },
+  verify: { type: 'string' },
+  format: { type: 'string' },
+  critical: { type: 'string' },
+  protected: { type: 'string' },
 };
 
 function requireRoot() {
@@ -117,6 +124,13 @@ function createNew(positionals, values) {
   }
   const item = workspace.createItem(root, slug, track, machine.firstStage(track), files);
   console.log(`${item.id}  ${item.track}  ${item.stage}`);
+  return 0;
+}
+
+function changed(positionals) {
+  const root = requireRoot();
+  const item = workspace.activeItem(root, positionals[0]);
+  for (const file of workspace.changedFiles(root, item.base)) console.log(file);
   return 0;
 }
 
@@ -255,6 +269,16 @@ function version() {
   return JSON.parse(fs.readFileSync(manifest, 'utf8')).version;
 }
 
+function initialize(positionals, values) {
+  const options = {
+    commands: { setup: values.setup, verify: values.verify, format: values.format },
+    critical: parseFiles(values.critical),
+    protected: parseFiles(values.protected),
+  };
+  console.log(`Factory initialized at ${workspace.init(process.cwd(), options)}`);
+  return 0;
+}
+
 function dispatch(argv) {
   const [command, ...rest] = argv;
   if (command === '--version') {
@@ -266,13 +290,11 @@ function dispatch(argv) {
     return 0;
   }
   const commands = {
-    init: () => {
-      console.log(`Factory initialized at ${workspace.init(process.cwd())}`);
-      return 0;
-    },
+    init: initialize,
     setup,
     new: createNew,
     status,
+    changed,
     check,
     verify,
     advance,

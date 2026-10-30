@@ -25,6 +25,7 @@ const DEFAULT_CONFIG = {
 
 const AGENT_TEAMS_FLAG = 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS';
 const WORKTREES_IGNORE = '.claude/worktrees/';
+const CLI_PERMISSION = 'Bash(sdlc *)';
 
 const UNREACHABLE_WARNING =
   'This worktree has no .sdlc/, so the factory gates are off here. The main checkout ' +
@@ -146,23 +147,34 @@ function ignoreWorktrees(root) {
 }
 
 // A plugin can't ship settings, so the project has to turn agent teams on itself.
-function enableAgentTeams(root) {
+// Allowing the CLI is safe because it can't approve or abandon anything.
+function writeProjectSettings(root) {
   const dir = path.join(root, '.claude');
   const file = path.join(dir, 'settings.json');
   const settings = fs.existsSync(file) ? readJson(file, '.claude/settings.json') : {};
-  if (settings.env?.[AGENT_TEAMS_FLAG] === '1') return;
+  const allow = settings.permissions?.allow ?? [];
   fs.mkdirSync(dir, { recursive: true });
-  writeJson(file, { ...settings, env: { ...settings.env, [AGENT_TEAMS_FLAG]: '1' } });
+  writeJson(file, {
+    ...settings,
+    env: { ...settings.env, [AGENT_TEAMS_FLAG]: '1' },
+    permissions: { ...settings.permissions, allow: [...new Set([...allow, CLI_PERMISSION])] },
+  });
 }
 
-function init(cwd) {
+function init(cwd, { commands = {}, critical = [], protected: guarded = [] } = {}) {
   const existing = findRoot(cwd);
   if (existing) throw new SdlcError(`factory already initialized at ${existing}`);
   const root = gitTop(cwd) ?? path.resolve(cwd);
-  enableAgentTeams(root);
+  writeProjectSettings(root);
   ignoreWorktrees(root);
   fs.mkdirSync(workDir(root), { recursive: true });
-  writeJson(path.join(root, SDLC_DIR, 'config.json'), DEFAULT_CONFIG);
+  const given = Object.fromEntries(Object.entries(commands).filter(([, value]) => value));
+  writeJson(path.join(root, SDLC_DIR, 'config.json'), {
+    ...DEFAULT_CONFIG,
+    commands: { ...DEFAULT_CONFIG.commands, ...given },
+    tracks: { ...DEFAULT_CONFIG.tracks, critical: { paths: critical } },
+    protected: guarded,
+  });
   return root;
 }
 

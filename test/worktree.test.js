@@ -206,10 +206,17 @@ test('init keeps what the project already has', (t) => {
   fs.writeFileSync(path.join(root, '.gitignore'), 'data/');
   sdlc(root, 'init');
   const settings = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
-  assert.deepEqual(settings.permissions, existing.permissions);
+  assert.deepEqual(settings.permissions.allow, ['Bash(make *)', 'Bash(sdlc *)']);
   assert.equal(settings.env.FOO, 'bar');
   assert.equal(settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS, '1');
   assert.equal(fs.readFileSync(path.join(root, '.gitignore'), 'utf8'), 'data/\n.claude/worktrees/\n');
+});
+
+test('init allows the CLI, which can\'t approve anything', (t) => {
+  const root = repo(t);
+  sdlc(root, 'init');
+  const settings = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
+  assert.deepEqual(settings.permissions.allow, ['Bash(sdlc *)']);
 });
 
 test('init doesn\'t repeat an ignore line that\'s already there', (t) => {
