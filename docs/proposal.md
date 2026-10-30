@@ -264,7 +264,7 @@ The config is JSON, not YAML. Node has no built-in YAML parser, and a hand-writt
 
 | Workflow | Job |
 | --- | --- |
-| `sdlc-gates.yml` | **Required check.** Recomputes approval hashes, confirms the diff is within plan scope, confirms the right artifacts exist for the track, and rejects test edits on fix tasks. This is what makes the local gates real |
+| `sdlc-gates.yml` | **Required check.** Recomputes approval hashes, confirms the diff is within plan scope, confirms the right artifacts exist for the track, and rejects test edits on fix tasks. This is what makes the local gates real. It uses `pull_request_target`, so a change can't edit the workflow judging it, and it reads the change's files without running them |
 | `sdlc-review.yml` | Review against `REVIEW.md`, using `claude-code-action` or managed Code Review |
 | `sdlc-evals.yml` | Run `claude plugin eval` when skills, hooks, or `CLAUDE.md` change |
 | `sdlc-monitor.yml` | Later phase: cron detection, `claude -p` diagnosis, opens an intent PR |
@@ -323,7 +323,7 @@ All of these come from Git, the PR history, and CI. `sdlc metrics` reports the G
 | --- | --- |
 | The factory becomes the ceremony it's meant to replace | Tracks, and the review after Phase 2. `quick` must stay fast |
 | Bash gates are incomplete, since command matching is best effort | Treat them as feedback only; CI is the control |
-| Local approvals can be forged by an agent with Bash, by writing the file directly or running `claude -p` | `/sdlc:approve` has no CLI path and refuses unattended sessions, but neither stops a determined agent. Accepted for solo use. On a team, the real approval is the PR review |
+| Local approvals can be forged by an agent with Bash, by writing the file directly or running `claude -p` | `/sdlc:approve` has no CLI path and refuses unattended sessions, and `sdlc gates` catches a wrong hash, but an agent that computes the right hash and fills in a name still passes. Accepted for solo use. On a team, the real approval is the PR review |
 | Hook latency in every session | Immediate exit without `.sdlc/`; hooks kept fast and measured |
 | Infinite block loops at `SubagentStop` | Retry budget, then escalate |
 | Claude Code's plugin surface changes quickly (`experimental.evals`, `experimental.monitors`) | Pin a minimum version; keep logic in the CLI, not in platform features |
