@@ -1,0 +1,23 @@
+# This repo's copy of the template, which explains the trigger. Since this is the
+# plugin's own repo, the gate code comes from the base branch, not a published clone.
+name: sdlc-gates
+on:
+  pull_request_target:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: git worktree add --detach "$RUNNER_TEMP/base" "origin/$GITHUB_BASE_REF"
+      - run: node "$RUNNER_TEMP/base/plugins/sdlc/bin/sdlc" gates --base "origin/$GITHUB_BASE_REF"

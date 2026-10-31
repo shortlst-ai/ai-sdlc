@@ -204,6 +204,25 @@ describe('globs', () => {
   }
 });
 
+describe('abandoning', () => {
+  test('closes an open item from any stage', () => {
+    for (const stage of ['spec', 'build', 'merge']) {
+      assert.equal(machine.abandon(item('standard', stage)).item.stage, machine.ABANDONED);
+    }
+  });
+
+  test('a closed item can\'t be abandoned', () => {
+    assert.equal(machine.abandon(item('standard', DONE)).ok, false);
+    assert.equal(machine.abandon(item('standard', machine.ABANDONED)).ok, false);
+  });
+
+  test('an abandoned item has nothing to do', () => {
+    const abandoned = item('standard', machine.ABANDONED);
+    assert.deepEqual(machine.nextAction(abandoned, completeFacts('standard')), { action: 'none' });
+    assert.equal(machine.isValidItem(abandoned), true);
+  });
+});
+
 describe('isValidItem', () => {
   test('accepts a real item', () => {
     assert.equal(machine.isValidItem(item('standard', 'plan')), true);

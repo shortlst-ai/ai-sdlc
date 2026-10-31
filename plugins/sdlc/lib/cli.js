@@ -1,27 +1,37 @@
 'use strict';
 
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const { parseArgs } = require('node:util');
 
+const { reviewBuild } = require('./check');
+const { runGates } = require('./gates');
 const machine = require('./machine');
 const { collect } = require('./metrics');
 const workspace = require('./workspace');
 
-const { DONE, TRACKS } = machine;
+const { TRACKS, isOpen } = machine;
 const { SdlcError } = workspace;
 
 const USAGE = `Usage: sdlc <command>
 
 Commands:
-  init                               Set up the factory in this directory
+  init [--setup C] [--verify C] [--format C] [--critical a,b] [--protected a,b]
+                                     Set up the factory in this repo
+  setup                              Build this worktree's environment
   new <slug> [--files a,b] [--track T]
                                      Start a work item. Files decide the track
   status [<id>] [--json]             Show work items and the next action
+  changed [<id>]                     List the files this item has changed
+  check [<id>]                       Compare the real diff to the plan's scope
+  verify [<id>]                      Run the verify command and record evidence
   advance [<id>]                     Move to the next stage if its gate passes
   rework [<id>] --reason <text>      Send verify or review back to build
   track [<id>] [<track>] [--files a,b]
-                                     Raise a track. Tracks can never be lowered
+                                     Raise a track, or add files to the item.
+                                     Tracks can never be lowered
+  gates --base <ref> [--json]        Recheck every gate, for CI
   metrics [--since <date>] [--json]  Summarize delivery from Git history
   --version                          Print the plugin version
   --help                             Print this help
@@ -34,6 +44,12 @@ const OPTIONS = {
   track: { type: 'string' },
   reason: { type: 'string' },
   since: { type: 'string' },
+  base: { type: 'string' },
+  setup: { type: 'string' },
+  verify: { type: 'string' },
+  format: { type: 'string' },
+  critical: { type: 'string' },
+  protected: { type: 'string' },
 };
 
 function requireRoot() {
@@ -63,7 +79,7 @@ function record(item, event) {
 }
 
 function repoNext(items) {
-  const open = items.filter((item) => item.stage !== DONE);
+  const open = items.filter(isOpen);
   if (open.length === 0) return { action: 'new' };
   if (open.length === 1) return { id: open[0].id, ...open[0].next };
   return { action: 'choose', ids: open.map((item) => item.id) };
@@ -72,14 +88,20 @@ function repoNext(items) {
 function status(positionals, values) {
   const root = workspace.findRoot(process.cwd());
   if (!root) {
-    if (values.json) console.log(JSON.stringify({ initialized: false, root: null }));
-    else console.log('This repo does not use the factory: no .sdlc/ directory found.');
+    const main = workspace.unreachableFactory(process.cwd());
+    if (values.json) {
+      console.log(JSON.stringify({ initialized: false, root: null, ...(main && { main_checkout: main }) }));
+    } else if (main) {
+      console.log(workspace.UNREACHABLE_WARNING);
+    } else {
+      console.log('This repo does not use the factory: no .sdlc/ directory found.');
+    }
     return 0;
   }
-  const ids = positionals[0]
-    ? [workspace.resolveId(root, positionals[0])]
-    : workspace.listIds(root);
-  const items = ids.map((id) => describe(root, workspace.loadItem(root, id)));
+  const loaded = positionals[0]
+    ? [workspace.loadItem(root, workspace.resolveId(root, positionals[0]))]
+    : workspace.ownItems(root);
+  const items = loaded.map((item) => describe(root, item));
   const next = repoNext(items);
   if (values.json) {
     console.log(JSON.stringify({ initialized: true, root, items, next }));
@@ -104,20 +126,76 @@ function createNew(positionals, values) {
   if (machine.trackRank(track) < machine.trackRank(classified)) {
     throw new SdlcError(`these files need at least the '${classified}' track, not '${track}'`);
   }
-  const item = workspace.createItem(root, slug, track, machine.firstStage(track));
+  const item = workspace.createItem(root, slug, track, machine.firstStage(track), files);
   console.log(`${item.id}  ${item.track}  ${item.stage}`);
+  return 0;
+}
+
+function changed(positionals) {
+  const root = requireRoot();
+  const item = workspace.activeItem(root, positionals[0]);
+  for (const file of workspace.changedFiles(root, item.base)) console.log(file);
+  return 0;
+}
+
+function check(positionals) {
+  const root = requireRoot();
+  const item = workspace.activeItem(root, positionals[0]);
+  const { problems } = reviewBuild(root, item, workspace.loadConfig(root));
+  if (problems.length > 0) throw new SdlcError(`${item.id}: ${problems.join('; ')}`);
+  console.log(`${item.id}: the changes match the plan.`);
+  return 0;
+}
+
+function tail(text, lines) {
+  return text.trimEnd().split('\n').slice(-lines).join('\n');
+}
+
+// The tool writes the evidence, not an agent, so it's the test output itself. A
+// failing run removes any earlier pass, so an old result can't stand in for it.
+function verify(positionals) {
+  const root = requireRoot();
+  const item = workspace.activeItem(root, positionals[0]);
+  if (item.stage !== 'verify') throw new SdlcError(`${item.id} is at ${item.stage}, not verify`);
+  const command = workspace.loadConfig(root).commands?.verify;
+  if (!command) throw new SdlcError('set commands.verify in .sdlc/config.json');
+  const result = spawnSync('sh', ['-c', command], { cwd: root, encoding: 'utf8', maxBuffer: 1 << 28 });
+  const output = tail(`${result.stdout ?? ''}${result.stderr ?? ''}`, 200);
+  const code = workspace.codeFingerprint(root, item.base);
+  const body = `command: ${command}\ncommit: ${workspace.headCommit(root)}\ncode: ${code}\n\n${output}\n`;
+  if (result.status !== 0) {
+    workspace.removeEvidence(root, item, 'verify.md');
+    workspace.writeEvidence(root, item, 'verify-failed.md', body);
+    throw new SdlcError(`verify failed: ${command}\n${tail(output, 20)}`);
+  }
+  workspace.removeEvidence(root, item, 'verify-failed.md');
+  workspace.writeEvidence(root, item, 'verify.md', body);
+  console.log(`${item.id}: verify passed.`);
   return 0;
 }
 
 function advance(positionals) {
   const root = requireRoot();
-  const item = workspace.activeItem(root, positionals[0]);
+  let item = workspace.activeItem(root, positionals[0]);
+  if (item.stage === 'build') {
+    const review = reviewBuild(root, item, workspace.loadConfig(root));
+    if (review.problems.length > 0) {
+      throw new SdlcError(`can't advance ${item.id}: ${review.problems.join('; ')}`);
+    }
+    if (review.item.track !== item.track) {
+      const event = { track: { from: item.track, to: review.item.track }, from: item.stage, to: review.item.stage };
+      workspace.saveItem(root, record(review.item, event));
+      console.log(`${item.id}: its files need the ${review.item.track} track, so the track was raised.`);
+      item = workspace.loadItem(root, item.id);
+    }
+  }
   const result = machine.advance(item, workspace.readFacts(root, item));
   if (!result.ok) {
-    if (item.stage === DONE) throw new SdlcError(`${item.id} is already done`);
+    if (!isOpen(item)) throw new SdlcError(`${item.id} is already ${item.stage}`);
     throw new SdlcError(`can't advance ${item.id}: ${machine.describeNext(result.next)}`);
   }
-  workspace.saveItem(root, record(result.item, { from: item.stage, to: result.item.stage }));
+  const event = { from: item.stage, to: result.item.stage, commit: workspace.headCommit(root) };
+  workspace.saveItem(root, record(result.item, event));
   console.log(`${item.id}  ${item.stage} -> ${result.item.stage}`);
   return 0;
 }
@@ -143,7 +221,10 @@ function track(positionals, values) {
   if (!named && !values.files) throw new SdlcError('sdlc track needs a track or --files', 2);
   const item = workspace.activeItem(root, query);
   const config = workspace.loadConfig(root);
-  const candidates = [named, values.files && machine.classify(parseFiles(values.files), config)];
+  // Files add to what the item already declared, so its track is judged on all of
+  // them. A quick item that outgrows its limit gets raised rather than refused.
+  const files = values.files ? [...new Set([...(item.files ?? []), ...parseFiles(values.files)])] : item.files;
+  const candidates = [named, values.files && machine.classify(files, config)];
   const wanted = candidates.filter(Boolean);
   if (named && machine.trackRank(named) < machine.trackRank(item.track)) {
     throw new SdlcError(`can't lower the track from '${item.track}' to '${named}'`);
@@ -154,12 +235,40 @@ function track(positionals, values) {
   );
   const result = machine.raiseTrack(item, target);
   if (!result.ok) throw new SdlcError(`can't change the track: ${result.reason}`);
-  if (target !== item.track) {
-    const event = { track: { from: item.track, to: target }, from: item.stage, to: result.item.stage };
-    workspace.saveItem(root, record(result.item, event));
+  const added = (files ?? []).filter((file) => !(item.files ?? []).includes(file));
+  if (target !== item.track || added.length > 0) {
+    const event = { from: item.stage, to: result.item.stage };
+    if (target !== item.track) event.track = { from: item.track, to: target };
+    if (added.length > 0) event.files = added;
+    workspace.saveItem(root, record({ ...result.item, files }, event));
   }
   console.log(`${item.id}  ${target}  ${result.item.stage}`);
   return 0;
+}
+
+function setup() {
+  const root = requireRoot();
+  const command = workspace.loadConfig(root).commands?.setup;
+  if (!command) {
+    console.log('No setup command in .sdlc/config.json, so nothing to do.');
+    return 0;
+  }
+  const result = spawnSync('sh', ['-c', command], { cwd: root, stdio: 'inherit' });
+  if (result.status !== 0) throw new SdlcError(`setup failed: ${command}`);
+  workspace.markSetupDone(root, command);
+  console.log('Setup finished.');
+  return 0;
+}
+
+// Exit 1 here is what fails the required check.
+function gates(positionals, values) {
+  if (!values.base) throw new SdlcError('sdlc gates needs --base', 2);
+  const result = runGates(process.cwd(), values.base);
+  if (values.json) console.log(JSON.stringify(result));
+  else if (!result.factory) console.log('This repo does not use the factory.');
+  else if (result.problems.length === 0) console.log(`Gates passed for ${result.items.length} work items.`);
+  else for (const problem of result.problems) console.error(`sdlc: ${problem}`);
+  return result.problems.length === 0 ? 0 : 1;
 }
 
 function metrics(positionals, values) {
@@ -181,6 +290,16 @@ function version() {
   return JSON.parse(fs.readFileSync(manifest, 'utf8')).version;
 }
 
+function initialize(positionals, values) {
+  const options = {
+    commands: { setup: values.setup, verify: values.verify, format: values.format },
+    critical: parseFiles(values.critical),
+    protected: parseFiles(values.protected),
+  };
+  console.log(`Factory initialized at ${workspace.init(process.cwd(), options)}`);
+  return 0;
+}
+
 function dispatch(argv) {
   const [command, ...rest] = argv;
   if (command === '--version') {
@@ -192,15 +311,17 @@ function dispatch(argv) {
     return 0;
   }
   const commands = {
-    init: () => {
-      console.log(`Factory initialized at ${workspace.init(process.cwd())}`);
-      return 0;
-    },
+    init: initialize,
+    setup,
     new: createNew,
     status,
+    changed,
+    check,
+    verify,
     advance,
     rework,
     track,
+    gates,
     metrics,
   };
   if (!Object.hasOwn(commands, command)) {

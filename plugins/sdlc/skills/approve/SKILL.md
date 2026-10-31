@@ -1,7 +1,7 @@
 ---
 description: Record a human approval for the stage a work item is waiting on. For people only.
 disable-model-invocation: true
-argument-hint: "[work-item-id]"
+argument-hint: "[work item name or id]"
 ---
 
 A hook handled this command before you saw it, so there is nothing for you to do.

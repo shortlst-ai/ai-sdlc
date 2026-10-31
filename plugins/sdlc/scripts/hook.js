@@ -8,6 +8,7 @@ const { execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { reviewBuild } = require('../lib/check');
 const machine = require('../lib/machine');
 const { checkCommand, checkEdit, roleOf } = require('../lib/policy');
 const workspace = require('../lib/workspace');
@@ -19,9 +20,8 @@ function refuse(reason) {
 
 function openItems(root) {
   return workspace
-    .listIds(root)
-    .map((id) => workspace.loadItem(root, id))
-    .filter((item) => item.stage !== machine.DONE)
+    .ownItems(root)
+    .filter(machine.isOpen)
     .map((item) => {
       const next = machine.nextAction(item, workspace.readFacts(root, item));
       return { item, next, describeNext: machine.describeNext(next) };
@@ -48,7 +48,7 @@ function preEdit(root, input) {
   if (file === null) return;
   const decision = checkEdit({
     file,
-    role: roleOf(input.agent_type),
+    role: roleOf(input.agent_type, workspace.readTeam(input.session_id)),
     items: openItems(root),
     config: workspace.loadConfig(root),
   });
@@ -97,7 +97,35 @@ function postEdit(root, input) {
   );
 }
 
+// Gives a builder its problems back as its next instruction, a limited number of
+// times, then lets it stop so a person hears about it instead of it looping.
+function subagentStop(root, input) {
+  const role = roleOf(input.agent_type, workspace.readTeam(input.session_id));
+  if (role !== 'builder') return;
+  const [item] = workspace.ownItems(root).filter((entry) => entry.stage === 'build');
+  if (!item) return;
+  const config = workspace.loadConfig(root);
+  const { problems } = reviewBuild(root, item, config);
+  const command = config.commands?.verify;
+  if (problems.length === 0 && command) {
+    const result = spawnSync('sh', ['-c', command], { cwd: root, encoding: 'utf8', maxBuffer: 1 << 28 });
+    if (result.status !== 0) {
+      const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trimEnd().split('\n').slice(-20).join('\n');
+      problems.push(`\`${command}\` failed:\n${output}`);
+    }
+  }
+  if (problems.length === 0) return;
+  if (workspace.countStopBlock(root, input.agent_id) > config.limits.rework) {
+    console.error(`sdlc: giving up on ${item.id} after repeated failures: ${problems.join('; ')}`);
+    return;
+  }
+  console.log(JSON.stringify({ decision: 'block', reason: `Not finished. ${problems.join('; ')}` }));
+}
+
 function sessionStart(root) {
+  if (workspace.setupPending(root)) {
+    console.log('This worktree has no environment yet. Run `sdlc setup` before building or testing.');
+  }
   const open = openItems(root);
   if (open.length === 0) return;
   console.log('Open sdlc work items:');
@@ -110,6 +138,7 @@ const HANDLERS = {
   'pre-edit': preEdit,
   'pre-bash': preBash,
   'post-edit': postEdit,
+  'subagent-stop': subagentStop,
   'session-start': sessionStart,
 };
 
@@ -118,7 +147,12 @@ function main() {
   if (!handler) throw new Error(`unknown hook '${process.argv[2]}'`);
   const input = JSON.parse(fs.readFileSync(0, 'utf8'));
   const root = workspace.findRoot(input.cwd);
-  if (!root) return;
+  if (!root) {
+    if (process.argv[2] === 'session-start' && workspace.unreachableFactory(input.cwd)) {
+      console.log(workspace.UNREACHABLE_WARNING);
+    }
+    return;
+  }
   try {
     handler(root, input);
   } catch (error) {

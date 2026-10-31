@@ -3,7 +3,14 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hook.js", "session-start"] }
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hook.js",
+              "session-start"
+            ]
+          }
         ]
       }
     ],
@@ -11,13 +18,27 @@
       {
         "matcher": "Write|Edit|NotebookEdit",
         "hooks": [
-          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hook.js", "pre-edit"] }
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hook.js",
+              "pre-edit"
+            ]
+          }
         ]
       },
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hook.js", "pre-bash"] }
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hook.js",
+              "pre-bash"
+            ]
+          }
         ]
       }
     ],
@@ -25,7 +46,14 @@
       {
         "matcher": "Write|Edit",
         "hooks": [
-          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hook.js", "post-edit"] }
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hook.js",
+              "post-edit"
+            ]
+          }
         ]
       }
     ],
@@ -36,8 +64,54 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/on-approve.js"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/on-human-command.js",
+              "approve"
+            ],
             "onFailure": "block"
+          }
+        ]
+      },
+      {
+        "matcher": "sdlc:abandon",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/on-human-command.js",
+              "abandon"
+            ],
+            "onFailure": "block"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/await-approval.js"
+            ],
+            "asyncRewake": true,
+            "timeout": 86400
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hook.js",
+              "subagent-stop"
+            ]
           }
         ]
       }
