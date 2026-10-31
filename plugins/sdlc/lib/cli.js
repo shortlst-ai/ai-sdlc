@@ -29,7 +29,8 @@ Commands:
   advance [<id>]                     Move to the next stage if its gate passes
   rework [<id>] --reason <text>      Send verify or review back to build
   track [<id>] [<track>] [--files a,b]
-                                     Raise a track. Tracks can never be lowered
+                                     Raise a track, or add files to the item.
+                                     Tracks can never be lowered
   gates --base <ref> [--json]        Recheck every gate, for CI
   metrics [--since <date>] [--json]  Summarize delivery from Git history
   --version                          Print the plugin version
@@ -220,7 +221,10 @@ function track(positionals, values) {
   if (!named && !values.files) throw new SdlcError('sdlc track needs a track or --files', 2);
   const item = workspace.activeItem(root, query);
   const config = workspace.loadConfig(root);
-  const candidates = [named, values.files && machine.classify(parseFiles(values.files), config)];
+  // Files add to what the item already declared, so its track is judged on all of
+  // them. A quick item that outgrows its limit gets raised rather than refused.
+  const files = values.files ? [...new Set([...(item.files ?? []), ...parseFiles(values.files)])] : item.files;
+  const candidates = [named, values.files && machine.classify(files, config)];
   const wanted = candidates.filter(Boolean);
   if (named && machine.trackRank(named) < machine.trackRank(item.track)) {
     throw new SdlcError(`can't lower the track from '${item.track}' to '${named}'`);
@@ -231,9 +235,12 @@ function track(positionals, values) {
   );
   const result = machine.raiseTrack(item, target);
   if (!result.ok) throw new SdlcError(`can't change the track: ${result.reason}`);
-  if (target !== item.track) {
-    const event = { track: { from: item.track, to: target }, from: item.stage, to: result.item.stage };
-    workspace.saveItem(root, record(result.item, event));
+  const added = (files ?? []).filter((file) => !(item.files ?? []).includes(file));
+  if (target !== item.track || added.length > 0) {
+    const event = { from: item.stage, to: result.item.stage };
+    if (target !== item.track) event.track = { from: item.track, to: target };
+    if (added.length > 0) event.files = added;
+    workspace.saveItem(root, record({ ...result.item, files }, event));
   }
   console.log(`${item.id}  ${target}  ${result.item.stage}`);
   return 0;

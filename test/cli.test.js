@@ -263,6 +263,29 @@ test('track raises from a name or from files, and never lowers', (t) => {
   assert.equal(status(cwd).items[0].stage, 'spec');
 });
 
+test('track adds files to a quick item and judges the track on all of them', (t) => {
+  const cwd = repo(t);
+  run(['new', 'a', '--files', 'a.py,a_test.py'], cwd);
+  const state = () => JSON.parse(fs.readFileSync(path.join(itemDir(cwd, '0001-a'), 'state.json'), 'utf8'));
+
+  assert.equal(run(['track', '--files', 'b.py'], cwd).status, 0);
+  assert.equal(state().track, 'quick');
+  assert.deepEqual(state().files, ['a.py', 'a_test.py', 'b.py']);
+  assert.deepEqual(state().history.at(-1).files, ['b.py']);
+
+  assert.equal(run(['track', '--files', 'c.py'], cwd).status, 0);
+  assert.equal(state().track, 'standard');
+  assert.deepEqual(state().files, ['a.py', 'a_test.py', 'b.py', 'c.py']);
+});
+
+test('track leaves the item alone when its files add nothing', (t) => {
+  const cwd = repo(t);
+  run(['new', 'a', '--files', 'a.py'], cwd);
+  assert.equal(run(['track', '--files', 'a.py'], cwd).status, 0);
+  const state = JSON.parse(fs.readFileSync(path.join(itemDir(cwd, '0001-a'), 'state.json'), 'utf8'));
+  assert.deepEqual(state.history, []);
+});
+
 test('track needs a track or files', (t) => {
   const cwd = repo(t);
   run(['new', 'feature'], cwd);
