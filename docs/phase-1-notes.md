@@ -11,8 +11,8 @@ What the first real runs showed, for the Phase 2 review. These are observations 
 
 ## Ceremony and friction
 
-- **Agents finish, then stop.** After an approval the session waits for `/sdlc:next` instead of continuing. It happened at every gate. This is the easiest thing to remove.
-- **Attaching to a session is awkward.** Text typed in the wrong session goes to Claude as chat, and `Ctrl-a d` didn't work in the person's terminal. Approving from a `screen` session cost more than the approval itself. Consider a way to approve without attaching.
+- **Agents finish, then stop.** After an approval the session waited for `/sdlc:next` instead of continuing. Fixed: a background `Stop` hook wakes the session. Sessions started before the fix still need the nudge.
+- **Attaching to a session was confusing.** Text typed in the wrong session went to Claude as chat, and `Ctrl-a d` didn't work in the person's terminal. Fixed: `/sdlc:approve <name>` now works from any session on the repo, and with no name it lists what's waiting.
 - **An idle prompt offers `/sdlc:approve` as a suggestion.** Pressing Enter might accept a gate the person meant to hold. This isn't tested, so check it before relying on the gate.
 - **Spec gates were worth their cost.** The labels spec surfaced a real decision about label text. Reading the harvester spec found a change that would have silently stopped future refreshes.
 - **Specs ran long for the request.** The harvester brief grew to 25 acceptance criteria plus a ledger, exit codes, and a new flag. It was good work, but it's a lot to review at a gate.
@@ -23,6 +23,7 @@ What the first real runs showed, for the Phase 2 review. These are observations 
 - **Nothing landed work without a remote.** Fixed: `next` now runs the gates and hands over the merge.
 - **A quick item couldn't add a file.** The fix needed a third file, and `sdlc track --files` didn't record it. Fixed: it now adds to the item and judges the track on all files.
 - **A permission prompt can stall a session silently.** Reading the plugin's source outside the working directory stopped one run for 8 minutes. Agents shouldn't need that source, so the CLI help should answer those questions.
+- **A lead can stall after a teammate reports back.** One rehearsal item with no brief stopped after its researcher finished and never wrote a spec. It hasn't been reproduced with a real brief, so watch for it.
 - **The `critical` track can't finish yet.** It has no `release` skill, so a repo can't safely configure critical paths.
 
 ## Small fixes to make

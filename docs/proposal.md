@@ -259,6 +259,7 @@ The config is JSON, not YAML. Node has no built-in YAML parser, and a hand-writt
 | `PostToolUse` Write/Edit | Run the formatter on the changed file |
 | `SubagentStop` builder | Compare the diff to plan scope, run verify, block with the reason, retry within budget |
 | `UserPromptExpansion` | Record approvals for `/sdlc:approve` |
+| `Stop` | Wait in the background at a gate, then wake the session once a person approves |
 
 ### CI templates (Layer 3)
 

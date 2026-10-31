@@ -1,7 +1,7 @@
 ---
 description: Close a work item that's no longer wanted, keeping it on record. For people only.
 disable-model-invocation: true
-argument-hint: "[work-item-id] <reason>"
+argument-hint: "[id] <reason>"
 ---
 
 A hook handled this command before you saw it, so there is nothing for you to do.

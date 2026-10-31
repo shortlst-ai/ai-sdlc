@@ -193,6 +193,12 @@ function setupMarker(root) {
   return file === null ? null : path.resolve(root, file);
 }
 
+// Held by the background wait at a gate, so stopping again doesn't start another.
+function waitMarker(root, id) {
+  const file = git(root, ['rev-parse', '--git-path', `sdlc-wait-${id}`]);
+  return file === null ? null : path.resolve(root, file);
+}
+
 // Counts how often one agent has been sent back, in the worktree's git directory.
 function countStopBlock(root, agentId) {
   const safe = String(agentId).replace(/[^\w-]/g, '_');
@@ -261,6 +267,38 @@ function ownItems(root) {
   return listIds(root)
     .map((id) => loadItem(root, id))
     .filter((item) => !item.branch || item.branch === branch);
+}
+
+// Open items in every checkout of this repo, so a person can act on any of them
+// from one place. A worktree with no factory, or one that's gone, has none.
+function openEverywhere(root) {
+  const listing = git(root, ['worktree', 'list', '--porcelain']) ?? '';
+  const checkouts = listing
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice('worktree '.length));
+  return checkouts.flatMap((dir) =>
+    ownItems(dir)
+      .filter(isOpen)
+      .map((item) => ({ root: dir, item })),
+  );
+}
+
+function matchesQuery(id, query) {
+  const [number, ...slug] = id.split('-');
+  if (/^\d+$/.test(query)) return Number(number) === Number(query);
+  return id === query || slug.join('-') === query;
+}
+
+// Finds an item by id, slug, or number, in whichever checkout holds it. Closed
+// items and bad names fall through to the checkout's own lookup and its errors.
+function locateItem(root, query) {
+  const matches = openEverywhere(root).filter(({ item }) => matchesQuery(item.id, query));
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    throw new SdlcError(`'${query}' is ambiguous: ${matches.map(({ item }) => item.id).join(', ')}`);
+  }
+  return { root, item: activeItem(root, query) };
 }
 
 // With no id given, the single open item is the active one. Choosing between
@@ -419,6 +457,8 @@ module.exports = {
   ownItems,
   loadConfig,
   loadItem,
+  locateItem,
+  openEverywhere,
   readArtifact,
   readFacts,
   readTeam,
@@ -427,4 +467,5 @@ module.exports = {
   saveItem,
   setupPending,
   unreachableFactory,
+  waitMarker,
 };

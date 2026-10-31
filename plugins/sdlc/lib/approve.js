@@ -30,12 +30,33 @@ function approver(root) {
   return { name, email };
 }
 
-// Approves only what the state machine is waiting on, so a stale request can't
-// sign off on the wrong stage. The hash binds the approval to these exact bytes.
-function approve({ cwd, query }) {
+function factoryRoot(cwd) {
   const root = workspace.findRoot(cwd);
   if (!root) throw new SdlcError('this repo does not use the factory: run sdlc init');
-  const item = workspace.activeItem(root, query);
+  return root;
+}
+
+// What's waiting on a person across the repo, for someone with no item here.
+function waitingList(root) {
+  return workspace.openEverywhere(root).flatMap(({ root: dir, item }) => {
+    const next = machine.nextAction(item, workspace.readFacts(dir, item));
+    return next.action === 'approve' ? [`${item.id} (${next.stage})`] : [];
+  });
+}
+
+function target(root, query) {
+  if (query) return workspace.locateItem(root, query);
+  const hasOwn = workspace.ownItems(root).some(machine.isOpen);
+  const waiting = hasOwn ? [] : waitingList(root);
+  if (waiting.length > 0) throw new SdlcError(`name one, waiting on you: ${waiting.join(', ')}`);
+  return { root, item: workspace.activeItem(root) };
+}
+
+// Approves only what the state machine is waiting on, so a stale request can't
+// sign off on the wrong stage. The hash binds the approval to these exact bytes.
+// The item can live in any worktree, because a person approves from one place.
+function approve({ cwd, query }) {
+  const { root, item } = target(factoryRoot(cwd), query);
   const facts = workspace.readFacts(root, item);
   const next = machine.nextAction(item, facts);
   if (next.action !== 'approve') {
@@ -55,9 +76,7 @@ function approve({ cwd, query }) {
 // The item stays on disk with its reason, so abandoning leaves an audit trail.
 function abandon({ cwd, query, reason }) {
   if (!reason) throw new SdlcError('give a reason: /sdlc:abandon [id] <reason>');
-  const root = workspace.findRoot(cwd);
-  if (!root) throw new SdlcError('this repo does not use the factory: run sdlc init');
-  const item = workspace.activeItem(root, query);
+  const { root, item } = target(factoryRoot(cwd), query);
   const result = machine.abandon(item);
   if (!result.ok) throw new SdlcError(result.reason);
   const event = { at: new Date().toISOString(), abandoned_from: item.stage, reason, by: approver(root) };

@@ -331,6 +331,7 @@ test('hooks.json wires every event and doesn\'t fail closed outside the factory'
   assert.equal(args(hooks.SessionStart[0]), 'session-start');
   assert.deepEqual(hooks.PreToolUse.map(args), ['pre-edit', 'pre-bash']);
   assert.equal(args(hooks.PostToolUse[0]), 'post-edit');
+  assert.equal(hooks.Stop[0].hooks[0].asyncRewake, true);
   // onFailure: block here would stop every edit in every repo on a machine with no Node.
   for (const entry of [...hooks.PreToolUse, ...hooks.PostToolUse, ...hooks.SessionStart]) {
     assert.equal(entry.hooks[0].onFailure, undefined);

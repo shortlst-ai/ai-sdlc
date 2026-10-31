@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { execFileSync, spawnSync } = require('node:child_process');
+const { execFileSync, spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -221,4 +221,175 @@ test('abandoning refuses in an unattended session', (t) => {
 
 test('the CLI has no way to abandon', (t) => {
   assert.equal(sdlc(['abandon', '--reason', 'x'], repo(t)).status, 2);
+});
+
+function linkedWorktree(root, name) {
+  const dir = path.join(root, '.claude', 'worktrees', name);
+  git(root, 'add', '-A');
+  git(root, 'commit', '-q', '-m', 'factory');
+  git(root, 'worktree', 'add', '-q', '-b', `worktree-${name}`, dir);
+  assert.equal(sdlc(['new', name], dir).status, 0);
+  fs.writeFileSync(path.join(dir, '.sdlc', 'work', `0002-${name}`, 'spec.md'), 'the spec');
+  return dir;
+}
+
+test('a person can approve an item in another worktree by its name', (t) => {
+  const root = repo(t);
+  hook(root, { args: `${ID} replaced by the worktree`, command: 'abandon' });
+  const dir = linkedWorktree(root, 'labels');
+
+  const context = hook(root, { args: 'labels' }).hookSpecificOutput.additionalContext;
+  assert.match(context, /Approval recorded: 0002-labels spec/);
+  assert.ok(fs.existsSync(path.join(dir, '.sdlc', 'work', '0002-labels', 'approvals', 'spec.json')));
+  assert.equal(sdlc(['status'], dir).stdout.includes('a person must approve'), false);
+});
+
+test('with no name and nothing here, approve lists what is waiting and records nothing', (t) => {
+  const root = repo(t);
+  hook(root, { args: `${ID} replaced by the worktree`, command: 'abandon' });
+  const dir = linkedWorktree(root, 'labels');
+
+  const result = hook(root);
+  assert.equal(result.decision, 'block');
+  assert.match(result.reason, /waiting on you: 0002-labels \(spec\)/);
+  assert.equal(fs.existsSync(path.join(dir, '.sdlc', 'work', '0002-labels', 'approvals')), false);
+});
+
+test('an item that isn\'t at a gate is left off the waiting list', (t) => {
+  const root = repo(t);
+  hook(root, { args: `${ID} replaced by the worktree`, command: 'abandon' });
+  const dir = linkedWorktree(root, 'labels');
+  fs.rmSync(path.join(dir, '.sdlc', 'work', '0002-labels', 'spec.md'));
+
+  const result = hook(root);
+  assert.equal(result.decision, 'block');
+  assert.doesNotMatch(result.reason, /waiting on you/);
+});
+
+test('a person can abandon an item in another worktree by its id', (t) => {
+  const root = repo(t);
+  hook(root, { args: `${ID} replaced by the worktree`, command: 'abandon' });
+  const dir = linkedWorktree(root, 'labels');
+
+  const context = hook(root, { args: '0002-labels not needed', command: 'abandon' });
+  assert.match(context.hookSpecificOutput.additionalContext, /Abandon recorded: 0002-labels/);
+  const state = path.join(dir, '.sdlc', 'work', '0002-labels', 'state.json');
+  assert.equal(JSON.parse(fs.readFileSync(state, 'utf8')).stage, 'abandoned');
+});
+
+test('worktrees with no factory, or gone from disk, don\'t get in the way', (t) => {
+  const root = repo(t);
+  hook(root, { args: `${ID} replaced by the worktree`, command: 'abandon' });
+  const dir = linkedWorktree(root, 'labels');
+  const plain = path.join(root, '.claude', 'worktrees', 'plain');
+  git(root, 'worktree', 'add', '-q', '-b', 'old', plain);
+  fs.rmSync(path.join(plain, '.sdlc'), { recursive: true });
+  const gone = path.join(root, '.claude', 'worktrees', 'gone');
+  git(root, 'worktree', 'add', '-q', '-b', 'older', gone);
+  fs.rmSync(gone, { recursive: true });
+
+  assert.match(hook(root, { args: 'labels' }).hookSpecificOutput.additionalContext, /Approval recorded/);
+  assert.ok(fs.existsSync(path.join(dir, '.sdlc', 'work', '0002-labels', 'approvals', 'spec.json')));
+});
+
+test('a number shared by two worktrees is refused rather than guessed', (t) => {
+  const root = repo(t);
+  hook(root, { args: `${ID} replaced by the worktree`, command: 'abandon' });
+  linkedWorktree(root, 'labels');
+  const second = path.join(root, '.claude', 'worktrees', 'other');
+  git(root, 'worktree', 'add', '-q', '-b', 'worktree-other', second);
+  assert.equal(sdlc(['new', 'other'], second).status, 0);
+
+  const result = hook(root, { args: '2' });
+  assert.equal(result.decision, 'block');
+  assert.match(result.reason, /ambiguous/);
+});
+
+test('an unattended session can\'t approve across worktrees either', (t) => {
+  const root = repo(t);
+  hook(root, { args: `${ID} replaced by the worktree`, command: 'abandon' });
+  const dir = linkedWorktree(root, 'labels');
+  const result = hook(root, { args: 'labels', extraEnv: { CLAUDE_CODE_SESSION_ATTENDED: '0' } });
+  assert.equal(result.decision, 'block');
+  assert.equal(fs.existsSync(path.join(dir, '.sdlc', 'work', '0002-labels', 'approvals')), false);
+});
+
+const AWAIT = path.join(PLUGIN, 'scripts', 'await-approval.js');
+
+function startWait(cwd) {
+  const child = spawn('node', [AWAIT], { env: env({ SDLC_AWAIT_POLL_MS: '20' }) });
+  child.stdin.end(JSON.stringify({ cwd }));
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  const done = new Promise((resolve) => {
+    child.on('close', (code) => resolve({ code, stderr: () => stderr }));
+  });
+  return { child, done };
+}
+
+function waitFor(condition) {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      if (condition()) resolve();
+      else if (Date.now() - started > 4000) reject(new Error('timed out'));
+      else setTimeout(check, 10);
+    };
+    check();
+  });
+}
+
+function markers(cwd) {
+  const dir = execFileSync('git', ['rev-parse', '--git-dir'], { cwd, encoding: 'utf8' }).trim();
+  return fs.readdirSync(path.resolve(cwd, dir)).filter((name) => name.startsWith('sdlc-wait-'));
+}
+
+test('a session stopped at a gate wakes once a person approves', async (t) => {
+  const cwd = repo(t);
+  writeSpec(cwd);
+  const { done } = startWait(cwd);
+  await waitFor(() => markers(cwd).length === 1);
+  hook(cwd);
+  const { code, stderr } = await done;
+  assert.equal(code, 2);
+  assert.match(stderr(), /A person approved 0001-feature, so continue with \/sdlc:next/);
+  assert.deepEqual(markers(cwd), []);
+});
+
+test('a session that stops away from a gate has nothing to wait for', async (t) => {
+  const cwd = repo(t);
+  const { code } = await startWait(cwd).done;
+  assert.equal(code, 0);
+  assert.deepEqual(markers(cwd), []);
+});
+
+test('stopping again at the same gate doesn\'t start a second wait', async (t) => {
+  const cwd = repo(t);
+  writeSpec(cwd);
+  const first = startWait(cwd);
+  await waitFor(() => markers(cwd).length === 1);
+  assert.equal((await startWait(cwd).done).code, 0);
+  hook(cwd);
+  assert.equal((await first.done).code, 2);
+});
+
+test('an abandoned item doesn\'t wake its session', async (t) => {
+  const cwd = repo(t);
+  writeSpec(cwd);
+  const { done } = startWait(cwd);
+  await waitFor(() => markers(cwd).length === 1);
+  hook(cwd, { args: `${ID} not needed`, command: 'abandon' });
+  assert.equal((await done).code, 0);
+});
+
+test('the wait never records an approval by itself', async (t) => {
+  const cwd = repo(t);
+  writeSpec(cwd);
+  const { child, done } = startWait(cwd);
+  await waitFor(() => markers(cwd).length === 1);
+  child.kill();
+  await done;
+  assert.equal(fs.existsSync(itemPath(cwd, 'approvals')), false);
 });

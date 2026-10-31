@@ -11,7 +11,7 @@ Run `sdlc status --json` and act on `next`:
 | `new` | Ask what to work on, then use `/sdlc:new` |
 | `choose` | Ask which item, using the ids listed |
 | `produce` | Use the stage's skill, in the table below |
-| `approve` | Stop. Show `next.artifact`, including any concerns it flags, and ask the person to type `/sdlc:approve`. If `next.stale` is set, say the file changed after approval. You can't approve anything |
+| `approve` | Stop. Show `next.artifact`, including any concerns it flags, and ask the person to type `/sdlc:approve <name of this item>`, here or in any other session on this repo. This session carries on by itself once they have. If `next.stale` is set, say the file changed after approval. You can't approve anything |
 | `advance` | Run `sdlc advance`, except at `build` as noted below, then run this skill again |
 | `none` | Commit `.sdlc/`, push if there's a remote, and say the item is finished. With no remote, see below |
 
