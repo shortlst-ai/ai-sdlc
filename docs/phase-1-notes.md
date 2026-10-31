@@ -1,6 +1,6 @@
 # Phase 1 notes
 
-What the first real runs showed, for the Phase 2 review. These are observations from one person's runs on `RCTResources`, so treat them as leads, not rates. This covers the run in progress on 2026-10-31.
+What the first real runs showed, for the Phase 2 review. These are observations from one person's runs on `RCTResources`, so treat them as leads, not rates. This covers the three runs of 2026-10-31. All three were merged with no rework.
 
 ## Timings
 
@@ -8,6 +8,7 @@ What the first real runs showed, for the Phase 2 review. These are observations 
 | --- | --- | --- | --- |
 | `curate-file-type` | `quick` | About 18 minutes, including 8 stuck at a prompt | 1 |
 | `openfda-labels` | `standard` | About 21 minutes after spec approval, plus about 6 for the spec | 2 |
+| `harvester-termination` | `standard` | About 59 minutes after spec approval, plus the spec and one amendment | 2 |
 
 ## Ceremony and friction
 
@@ -34,6 +35,7 @@ What the first real runs showed, for the Phase 2 review. These are observations 
 - `Gates passed for 1 work items.` has the wrong plural.
 - Parallel items can share a number, such as `0001-a` and `0001-b`. Slugs keep them unique, but the numbers read as if they were ordered.
 - `status` prints "Factory initialized at" as its heading.
+- `sdlc metrics --since <date>` drops most of that day, because Git reads a bare date as that date at the current time of day.
 
 ## Worked well
 
@@ -41,3 +43,8 @@ What the first real runs showed, for the Phase 2 review. These are observations 
 - The test lock and the scope check both refused bad changes during the dry runs, with clear reasons.
 - Real agent teams ran each role in a `claude --worktree` session.
 - Three items ran at the same time without touching each other.
+- `/sdlc:approve <name>` worked from the VS Code panel on the first try, and a real session woke by itself and finished after approval.
+
+## What the reviewer can't see
+
+The reviewer has read-only tools, so it can't run anything. On the harvester item, a person's check found what it couldn't: the old-code bug was unproven until someone ran it, and a spec read at the gate was a draft that had changed by the time it was committed. A gate should show only committed text. Nothing enforces that yet.
