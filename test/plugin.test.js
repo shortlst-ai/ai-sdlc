@@ -102,6 +102,7 @@ describe('skills', () => {
   test('skills never tell the model to approve or merge', () => {
     const next = skill('next');
     assert.match(next, /You can't approve anything/);
+    assert.match(next, /You don't run the merge/);
     assert.match(skill('ship'), /Never merge it yourself/);
   });
 });

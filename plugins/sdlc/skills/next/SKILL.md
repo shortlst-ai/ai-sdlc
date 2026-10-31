@@ -13,7 +13,7 @@ Run `sdlc status --json` and act on `next`:
 | `produce` | Use the stage's skill, in the table below |
 | `approve` | Stop. Show `next.artifact`, including any concerns it flags, and ask the person to type `/sdlc:approve`. If `next.stale` is set, say the file changed after approval. You can't approve anything |
 | `advance` | Run `sdlc advance`, except at `build` as noted below, then run this skill again |
-| `none` | Commit `.sdlc/`, push if there's a remote, and say the item is finished |
+| `none` | Commit `.sdlc/`, push if there's a remote, and say the item is finished. With no remote, see below |
 
 | Stage | Skill |
 | --- | --- |
@@ -25,6 +25,14 @@ Run `sdlc status --json` and act on `next`:
 | `merge` | `/sdlc:ship` |
 
 At `build`, `next.action` is always `advance`, because the stage has no file to wait for. Use `/sdlc:build` first, and advance only once the work is done.
+
+With no remote, nothing has reached the base branch yet. Run `sdlc gates --base <item's base>` and show the result. If it passes, give the person the merge to run themselves, with the real path and branch:
+
+```bash
+git -C <main checkout> merge --no-ff <item's branch>
+```
+
+Tell them to merge before ending this session and removing the worktree, because removing it deletes the branch and its commits. You don't run the merge: it's theirs, as a pull request's would be.
 
 Commit `.sdlc/` whenever this skill finishes a step, so a resumed session can pick up from Git.
 
