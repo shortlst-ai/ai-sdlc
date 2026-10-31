@@ -6,14 +6,14 @@ What the first real runs showed, for the Phase 2 review. These are observations 
 
 | Item | Track | Start to merge gate | Human approvals |
 | --- | --- | --- | --- |
-| `curate-file-type` | `quick` | About 17 minutes, including 8 stuck at a prompt | 1 |
-| `openfda-labels` | `standard` | About 25 minutes of agent time, after spec approval | 2 |
+| `curate-file-type` | `quick` | About 18 minutes, including 8 stuck at a prompt | 1 |
+| `openfda-labels` | `standard` | About 21 minutes after spec approval, plus about 6 for the spec | 2 |
 
 ## Ceremony and friction
 
 - **Agents finish, then stop.** After an approval the session waits for `/sdlc:next` instead of continuing. It happened at every gate. This is the easiest thing to remove.
 - **Attaching to a session is awkward.** Text typed in the wrong session goes to Claude as chat, and `Ctrl-a d` didn't work in the person's terminal. Approving from a `screen` session cost more than the approval itself. Consider a way to approve without attaching.
-- **An idle prompt offers `/sdlc:approve` as a suggestion.** Pressing Enter could accept a gate the person meant to hold. The hook can't tell that apart from typing it.
+- **An idle prompt offers `/sdlc:approve` as a suggestion.** Pressing Enter might accept a gate the person meant to hold. This isn't tested, so check it before relying on the gate.
 - **Spec gates were worth their cost.** The labels spec surfaced a real decision about label text. Reading the harvester spec found a change that would have silently stopped future refreshes.
 - **Specs ran long for the request.** The harvester brief grew to 25 acceptance criteria plus a ledger, exit codes, and a new flag. It was good work, but it's a lot to review at a gate.
 - **Quick-track reviews can't be acted on cheaply.** The test lock stops the build from changing tests, so gaps the reviewer finds in them need a follow-up or rework.
