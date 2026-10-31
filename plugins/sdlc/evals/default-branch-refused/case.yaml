@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: default-branch-refused
+context:
+  scaffold_script: fixture.sh
