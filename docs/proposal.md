@@ -325,6 +325,7 @@ All of these come from Git, the PR history, and CI. `sdlc metrics` reports the G
 | The factory becomes the ceremony it's meant to replace | Tracks, and the review after Phase 2. `quick` must stay fast |
 | Bash gates are incomplete, since command matching is best effort | Treat them as feedback only; CI is the control |
 | Local approvals can be forged by an agent with Bash, by writing the file directly or running `claude -p` | `/sdlc:approve` has no CLI path and refuses unattended sessions, and `sdlc gates` catches a wrong hash, but an agent that computes the right hash and fills in a name still passes. Accepted for solo use. On a team, the real approval is the PR review |
+| A change that edits only `.sdlc/config.json` passes `sdlc gates`, so loosened rules apply from the next change on | The gate judges each change by the base's rules, which stops a change loosening its own. Review the file in every PR that touches it. Blocking it outright would also stop people changing it |
 | Hook latency in every session | Immediate exit without `.sdlc/`; hooks kept fast and measured |
 | Infinite block loops at `SubagentStop` | Retry budget, then escalate |
 | Claude Code's plugin surface changes quickly (`experimental.evals`, `experimental.monitors`) | Pin a minimum version; keep logic in the CLI, not in platform features |

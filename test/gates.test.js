@@ -117,7 +117,60 @@ test('a repo without the factory passes', (t) => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gates-')));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   git(dir, 'init', '-q', '-b', 'main');
+  git(dir, 'config', 'user.name', 'Ada');
+  git(dir, 'config', 'user.email', 'ada@example.com');
+  touch(dir, 'a.py');
+  commitAll(dir);
+  git(dir, 'switch', '-q', '-c', 'feature');
+  touch(dir, 'b.py');
+  commitAll(dir);
   assert.equal(gates(dir).status, 0);
+});
+
+test('a change that deletes the factory fails', (t) => {
+  const cwd = repo(t);
+  git(cwd, 'checkout', '-q', '-b', 'evil');
+  git(cwd, 'rm', '-rq', '.sdlc');
+  touch(cwd, 'src/unreviewed.js');
+  commitAll(cwd);
+  fs.rmSync(path.join(cwd, '.sdlc'), { recursive: true, force: true });
+
+  const result = sdlc(cwd, 'gates', '--base', 'main');
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /removes the factory config/);
+});
+
+test('a change that deletes only the config fails, so it can\'t be done in two steps', (t) => {
+  const cwd = repo(t);
+  git(cwd, 'checkout', '-q', '-b', 'evil');
+  git(cwd, 'rm', '-q', '.sdlc/config.json');
+  commitAll(cwd);
+
+  const result = sdlc(cwd, 'gates', '--base', 'main');
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /removes the factory config/);
+});
+
+test('a leftover folder doesn\'t hide a deleted factory', (t) => {
+  const cwd = repo(t);
+  git(cwd, 'checkout', '-q', '-b', 'evil');
+  git(cwd, 'rm', '-rq', '.sdlc');
+  commitAll(cwd);
+  fs.mkdirSync(path.join(cwd, '.sdlc', 'work'), { recursive: true });
+  assert.equal(sdlc(cwd, 'gates', '--base', 'main').status, 1);
+});
+
+test('unrelated history is refused, even with no factory in the change', (t) => {
+  const cwd = repo(t);
+  git(cwd, 'checkout', '-q', '--orphan', 'evil');
+  git(cwd, 'rm', '-rfq', '.');
+  fs.rmSync(path.join(cwd, '.sdlc'), { recursive: true, force: true });
+  touch(cwd, 'unreviewed.js');
+  commitAll(cwd);
+
+  const result = sdlc(cwd, 'gates', '--base', 'main');
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /merge base/);
 });
 
 test('code with no work item fails', (t) => {
