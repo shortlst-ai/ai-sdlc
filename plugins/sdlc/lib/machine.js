@@ -24,6 +24,10 @@ const ARTIFACTS = {
 };
 
 // `gate: true` means a person must approve before the stage can be left.
+// REVIEW_GATE needs a person only when the review didn't plainly pass. A person
+// still merges the change either way, so a clean review needn't be signed off twice.
+const REVIEW_GATE = 'unless-review-passes';
+
 const FLOWS = {
   quick: [
     { stage: 'reproduce' },
@@ -38,7 +42,7 @@ const FLOWS = {
     { stage: 'build' },
     { stage: 'verify' },
     { stage: 'review' },
-    { stage: 'merge', gate: true },
+    { stage: 'merge', gate: REVIEW_GATE },
   ],
   critical: [
     { stage: 'intent', gate: true },
@@ -110,6 +114,18 @@ function classify(files, config) {
 
 // `facts.artifacts` maps artifact paths to their hash, or null when missing.
 // `facts.approvals` maps stage names to their recorded approval, if any.
+// The verdict line from a review report. Null when it's missing or the report
+// gives more than one answer, so an unclear review never skips a person.
+function reviewVerdict(text) {
+  const found = [...(text ?? '').matchAll(/^[*_\s]*verdict[*_\s]*:[*_`\s]*(pass|rework)\b/gim)];
+  const verdicts = new Set(found.map((match) => match[1].toLowerCase()));
+  return verdicts.size === 1 ? [...verdicts][0] : null;
+}
+
+function needsPerson(gate, facts) {
+  return gate === REVIEW_GATE ? facts.verdict !== 'pass' : Boolean(gate);
+}
+
 function nextAction(item, facts) {
   if (!isOpen(item)) return { action: 'none' };
 
@@ -123,7 +139,7 @@ function nextAction(item, facts) {
     if (!artifact) continue;
     const hash = facts.artifacts[artifact] ?? null;
     if (hash === null) return { action: 'produce', stage, artifact };
-    if (gate) {
+    if (needsPerson(gate, facts)) {
       const approval = facts.approvals[stage];
       if (!approval) return { action: 'approve', stage, artifact };
       if (approval.sha256 !== hash) return { action: 'approve', stage, artifact, stale: true };
@@ -205,4 +221,6 @@ module.exports = {
   raiseTrack,
   rework,
   trackRank,
+  needsPerson,
+  reviewVerdict,
 };

@@ -174,6 +174,39 @@ describe('sdlc metrics', () => {
     return spawnSync(CLI, ['metrics', ...args], { cwd, encoding: 'utf8', env: env() });
   }
 
+  test('a bare --since date keeps the whole of that day', (t) => {
+    const cwd = repo(t);
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    change(cwd, 'a.py', 'Add a', `${today}T00:00:01`);
+    const summary = JSON.parse(run(cwd, '--json', '--since', today).stdout);
+    assert.equal(summary.commits.total, 1);
+  });
+
+  function workItem(cwd, id, stage, history) {
+    const dir = path.join(cwd, '.sdlc', 'work', id);
+    fs.mkdirSync(dir, { recursive: true });
+    const state = { track: 'standard', stage, branch: 'main', rework: 0, history };
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(state));
+  }
+
+  test('counts human approvals per finished item', (t) => {
+    const cwd = repo(t);
+    fs.mkdirSync(path.join(cwd, '.sdlc'));
+    fs.writeFileSync(path.join(cwd, '.sdlc', 'config.json'), JSON.stringify({ version: 1, commands: {}, tracks: { critical: { paths: [] }, quick: { max_files: 3 } }, protected: [], tests: ['tests/**'], limits: { rework: 3 } }));
+    change(cwd, 'a.py', 'Add a', '2026-08-17T10:00:00-04:00');
+    const at = '2026-10-31T12:00:00Z';
+    workItem(cwd, '0001-a', 'done', [{ at, approved: 'spec' }, { at, approved: 'merge' }, { at, from: 'merge', to: 'done' }]);
+    workItem(cwd, '0002-b', 'done', [{ at, approved: 'spec' }, { at, from: 'merge', to: 'done' }]);
+    workItem(cwd, '0003-c', 'build', [{ at, approved: 'spec' }]);
+
+    const { approvals } = JSON.parse(run(cwd, '--json').stdout);
+    assert.deepEqual(approvals, { items: 2, total: 3, per_item: 1.5 });
+    const later = JSON.parse(run(cwd, '--json', '--since', '2026-11-01').stdout);
+    assert.equal(later.approvals.items, 0);
+  });
+
   test('works from a subfolder of a repo that doesn\'t use the factory', (t) => {
     const cwd = repo(t);
     change(cwd, 'src/a.py', 'Add a', '2026-08-17T10:00:00-04:00');

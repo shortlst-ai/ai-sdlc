@@ -24,4 +24,6 @@ Report, every time, in this format:
 **Minor** (nice to have): mark opinions as "(opinion)"
 **Verdict**: `pass` if there are no critical findings, otherwise `rework`
 
+Write the verdict exactly once, on its own line. On the `standard` track a clean `pass` lets the change go to a person for merging with no second approval, so an unclear report goes back to a person.
+
 If you find nothing critical, say so plainly. Don't invent problems to look thorough.

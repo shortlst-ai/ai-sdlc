@@ -46,7 +46,7 @@ function auditGates(root, item) {
     const hash = facts.artifacts[artifact] ?? null;
     if (hash === null) {
       problems.push(`${stage}: ${artifact} is missing or out of date`);
-    } else if (gate) {
+    } else if (machine.needsPerson(gate, facts)) {
       const approval = facts.approvals[stage];
       if (!approval) problems.push(`${stage}: no approval`);
       else if (approval.sha256 !== hash) problems.push(`${stage}: ${artifact} changed after approval`);

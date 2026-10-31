@@ -171,10 +171,12 @@ The track comes from `.sdlc/config.json` path rules, not from the model's judgme
 | Track | For | Stages | Human gates |
 | --- | --- | --- | --- |
 | `quick` | Small bug or tweak | Failing test, fix, verify, review | Merge only |
-| `standard` | Normal feature | Combined intent and spec, plan, build, verify, review | Spec, merge |
+| `standard` | Normal feature | Combined intent and spec, plan, build, verify, review | Spec, and merge only if the review didn't plainly pass |
 | `critical` | Auth, payments, migrations, regulated code | All stages, hidden scenarios, line-by-line human review | All five |
 
 The `quick` track borrows the playbook's rule for bug fixes: commit a failing test first, then lock test files during the fix.
+
+On `standard`, a person still merges the change, so a clean review doesn't need signing off twice. The merge gate applies only when the report's verdict is anything other than one plain `pass`. `sdlc gates` rechecks this. The first real runs took 1.67 approvals per item, and `sdlc metrics` tracks that number.
 
 ---
 

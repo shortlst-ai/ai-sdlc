@@ -35,7 +35,6 @@ What the first real runs showed, for the Phase 2 review. These are observations 
 - `Gates passed for 1 work items.` has the wrong plural.
 - Parallel items can share a number, such as `0001-a` and `0001-b`. Slugs keep them unique, but the numbers read as if they were ordered.
 - `status` prints "Factory initialized at" as its heading.
-- `sdlc metrics --since <date>` drops most of that day, because Git reads a bare date as that date at the current time of day.
 
 ## Worked well
 

@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { ARTIFACTS, FLOWS, isOpen, isValidItem } = require('./machine');
+const { ARTIFACTS, FLOWS, isOpen, isValidItem, reviewVerdict } = require('./machine');
 
 const SDLC_DIR = '.sdlc';
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -425,7 +425,9 @@ function readFacts(root, item) {
     }
     approvals[stage] = readApproval(path.join(dir, 'approvals', `${stage}.json`));
   }
-  return { artifacts, approvals };
+  const review = path.join(dir, ARTIFACTS.review);
+  const verdict = fs.existsSync(review) ? reviewVerdict(fs.readFileSync(review, 'utf8')) : null;
+  return { artifacts, approvals, verdict };
 }
 
 // An unreadable approval counts as no approval, so the gate stays shut.

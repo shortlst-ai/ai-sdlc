@@ -277,11 +277,12 @@ function metrics(positionals, values) {
     console.log(JSON.stringify(summary));
     return 0;
   }
-  const { period, commits, size, signals } = summary;
+  const { period, commits, size, signals, approvals } = summary;
   console.log(`${commits.total} commits over ${period.span_days} days, ${period.active_days} active`);
   console.log(`Median change: ${size.median_files} files, ${size.median_lines} lines`);
   console.log(`Fix commits: ${signals.fix_commits}. Reverts: ${signals.reverts}.`);
   console.log(`Commits touching tests: ${signals.touching_tests}`);
+  console.log(`Approvals: ${approvals.total} across ${approvals.items} finished items, ${approvals.per_item} each`);
   return 0;
 }
 
