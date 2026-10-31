@@ -99,6 +99,19 @@ describe('skills', () => {
     }
   });
 
+  test('every stage a session can reach has a skill', () => {
+    const next = skill('next');
+    const { ARTIFACTS } = require(path.join(PLUGIN, 'lib', 'machine'));
+    for (const stage of Object.keys(ARTIFACTS)) assert.match(next, new RegExp(`\\b${stage}\\b`), stage);
+    assert.ok(skills().includes('release'));
+    assert.match(next, /`release` \| `\/sdlc:release`/);
+  });
+
+  test('neither release nor learn acts by itself', () => {
+    assert.match(skill('release'), /You can't approve it/);
+    assert.match(skill('learn'), /Don't change anything yourself/);
+  });
+
   test('skills never tell the model to approve or merge', () => {
     const next = skill('next');
     assert.match(next, /You can't approve anything/);

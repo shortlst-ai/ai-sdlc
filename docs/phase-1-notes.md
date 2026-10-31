@@ -28,14 +28,6 @@ What the first real runs showed, for the Phase 2 review. These are observations 
 - **Long-lived sessions lose their login.** A session waiting at a gate for about five hours came back "Not logged in", so a slow human gate can outlast the session. The work was safe, because finishing an item only needs the CLI, and a resumed session should pick up.
 - **The `critical` track can't finish yet.** It has no `release` skill, so a repo can't safely configure critical paths.
 
-## Small fixes to make
-
-- `sdlc status` in the main checkout says "No work items yet" even when merged items exist.
-- A stray folder under `.sdlc/work/` stops every command.
-- `Gates passed for 1 work items.` has the wrong plural.
-- Parallel items can share a number, such as `0001-a` and `0001-b`. Slugs keep them unique, but the numbers read as if they were ordered.
-- `status` prints "Factory initialized at" as its heading.
-
 ## Worked well
 
 - Each worktree built its own environment in about 40 seconds, and that fixed the shared-venv problem.

@@ -23,6 +23,7 @@ Run `sdlc status --json` and act on `next`:
 | `verify` | `/sdlc:verify` |
 | `review` | `/sdlc:review` |
 | `merge` | `/sdlc:ship` |
+| `release` | `/sdlc:release` |
 
 At `build`, `next.action` is always `advance`, because the stage has no file to wait for. Use `/sdlc:build` first, and advance only once the work is done.
 

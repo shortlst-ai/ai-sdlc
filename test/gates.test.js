@@ -110,7 +110,7 @@ test('a change that followed the process passes', (t) => {
   const cwd = finished(t);
   const result = gates(cwd);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Gates passed for 1 work items/);
+  assert.match(result.stdout, /Gates passed for 1 work item\./);
 });
 
 test('a repo without the factory passes', (t) => {
@@ -213,6 +213,51 @@ test('the server rechecks the verdict, so a claimed done doesn\'t skip the perso
   commitAll(cwd);
   assert.equal(gates(cwd).status, 1);
   assert.deepEqual(problems(cwd), [`${ID}: merge: no approval`]);
+});
+
+test('a critical change can pass every gate through to release', (t) => {
+  const cwd = repo(t, { critical: ['src/**'] });
+  git(cwd, 'switch', '-q', '-c', 'feature');
+  sdlc(cwd, 'new', 'feature', '--track', 'critical');
+  const write = (file, content, stage) => {
+    touch(cwd, item(file), content);
+    if (stage) approve(cwd, stage, content);
+  };
+  write('intent.md', 'intent', 'intent');
+  assert.equal(sdlc(cwd, 'advance').status, 0);
+  write('spec.md', 'spec', 'spec');
+  assert.equal(sdlc(cwd, 'advance').status, 0);
+  write('plan.md', PLAN, 'plan');
+  assert.equal(sdlc(cwd, 'advance').status, 0);
+  touch(cwd, 'src/a.py');
+  assert.equal(sdlc(cwd, 'advance').status, 0);
+  assert.equal(sdlc(cwd, 'verify').status, 0);
+  assert.equal(sdlc(cwd, 'advance').status, 0);
+  write('evidence/review.md', 'Verdict: pass\n');
+  assert.equal(sdlc(cwd, 'advance').status, 0);
+
+  assert.equal(sdlc(cwd, 'advance').status, 1);
+  approve(cwd, 'merge', 'Verdict: pass\n');
+  assert.equal(sdlc(cwd, 'advance').status, 0);
+  assert.equal(state(cwd).stage, 'release');
+
+  assert.equal(sdlc(cwd, 'advance').status, 1);
+  write('evidence/release.md', 'ship it', 'release');
+  assert.equal(sdlc(cwd, 'advance').status, 0);
+  assert.equal(state(cwd).stage, 'done');
+  commitAll(cwd);
+  const result = gates(cwd);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('a critical change with no release sign-off fails', (t) => {
+  const cwd = repo(t, { critical: ['src/**'] });
+  git(cwd, 'switch', '-q', '-c', 'feature');
+  sdlc(cwd, 'new', 'feature', '--track', 'critical');
+  touch(cwd, 'src/a.py');
+  touch(cwd, item('evidence/release.md'), 'ship it');
+  commitAll(cwd);
+  assert.ok(problems(cwd).some((problem) => /release: no approval/.test(problem)));
 });
 
 test('code with no work item fails', (t) => {

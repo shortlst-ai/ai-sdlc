@@ -243,6 +243,7 @@ function listIds(root) {
   return fs
     .readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
+    .filter((entry) => fs.existsSync(path.join(dir, entry.name, 'state.json')))
     .map((entry) => entry.name)
     .sort();
 }
@@ -282,6 +283,11 @@ function openEverywhere(root) {
       .filter(isOpen)
       .map((item) => ({ root: dir, item })),
   );
+}
+
+function openElsewhere(root) {
+  const here = fs.realpathSync(root);
+  return openEverywhere(root).filter((found) => fs.realpathSync(found.root) !== here);
 }
 
 function matchesQuery(id, query) {
@@ -460,6 +466,7 @@ module.exports = {
   loadConfig,
   loadItem,
   locateItem,
+  openElsewhere,
   openEverywhere,
   readArtifact,
   readFacts,

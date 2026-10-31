@@ -281,3 +281,26 @@ test('with no setup command, setup says so', (t) => {
   const { dir } = factoryWorktree(t);
   assert.match(sdlc(dir, 'setup').stdout, /nothing to do/);
 });
+
+test('status on the main checkout shows open work in other worktrees', (t) => {
+  const root = repo(t);
+  commitFactory(root);
+  assert.match(sdlc(root, 'status').stdout, /No work items yet/);
+  const dir = worktree(root, 'labels');
+  assert.equal(sdlc(dir, 'new', 'labels').status, 0);
+
+  const output = sdlc(root, 'status').stdout;
+  assert.match(output, /0001-labels {2}standard {2}spec {2}next: write spec\.md/);
+  assert.match(output, /\(in \.claude\/worktrees\/labels\)/);
+  assert.doesNotMatch(output, /No work items yet/);
+  assert.doesNotMatch(output, /No open work items/);
+});
+
+test('a stray folder under the work directory doesn\'t stop every command', (t) => {
+  const root = repo(t);
+  commitFactory(root);
+  fs.mkdirSync(path.join(root, '.sdlc', 'work', 'evidence'), { recursive: true });
+  const result = sdlc(root, 'status');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /No work items yet/);
+});
