@@ -4,7 +4,7 @@
 // that's trying to follow the process. They aren't the security boundary: Bash
 // can always reach around them, so anything that must hold is rechecked in CI.
 
-const { DONE, matchesAny } = require('./machine');
+const { isOpen, matchesAny } = require('./machine');
 
 const ALLOW = { allow: true };
 
@@ -26,10 +26,18 @@ const ROLE_SCOPES = {
   researcher: READ_ONLY,
   reviewer: READ_ONLY,
   diagnoser: READ_ONLY,
+  unassigned: READ_ONLY,
 };
 
-function roleOf(agentType) {
-  return agentType?.startsWith('sdlc:') ? agentType.slice('sdlc:'.length) : null;
+// A teammate's hooks report its name as `agent_type`, and the role is only in the
+// team config, so that's checked first. That order also stops a teammate from
+// claiming a role through its name. In a team, anything without an sdlc role
+// can't write, because falling back to the lead's rights would fail open.
+function roleOf(agentType, team) {
+  const member = team?.members?.find(({ name }) => name === agentType);
+  const type = member ? member.agentType : agentType;
+  if (type?.startsWith('sdlc:')) return type.slice('sdlc:'.length);
+  return team && agentType ? 'unassigned' : null;
 }
 
 // A gate from an earlier stage that reopened stops all work until it's resolved.
@@ -70,7 +78,7 @@ function checkEdit({ file, role, items, config }) {
   const isTest = matchesAny(file, config.tests);
   if (scope === TESTS_ONLY && !isTest) return deny(`the ${role} role can only write test files`);
 
-  const open = items.filter(({ item }) => item.stage !== DONE);
+  const open = items.filter(({ item }) => isOpen(item));
   if (open.length === 0 || open.some((entry) => stageAllows(entry, isTest, role))) return ALLOW;
   return deny(`${file} can't be changed yet: ${describeBlock(open)}`);
 }
@@ -252,8 +260,8 @@ const READ_COMMANDS = new Set(['cat', 'ls', 'head', 'tail', 'grep', 'rg', 'jq', 
 const MANAGED_PATH = /(^|\/)\.sdlc\/(config\.json$|work\/[^/]+\/(state\.json$|approvals(\/|$)))/;
 
 function checkManaged(tokens) {
-  if (tokens.some((token) => token.endsWith('on-approve.js'))) {
-    return deny('approvals have to come from a person typing /sdlc:approve');
+  if (tokens.some((token) => token.endsWith('on-human-command.js'))) {
+    return deny('this has to come from a person typing the command');
   }
   const writes = tokens.some((token, i) => {
     if (!MANAGED_PATH.test(token)) return false;

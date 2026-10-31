@@ -3,23 +3,33 @@
 // Everything that touches the disk: finding the repo, reading config, and
 // reading and writing work items.
 
+const { execFileSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
-const { ARTIFACTS, DONE, FLOWS, isValidItem } = require('./machine');
+const { ARTIFACTS, FLOWS, isOpen, isValidItem } = require('./machine');
 
 const SDLC_DIR = '.sdlc';
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 const DEFAULT_CONFIG = {
   version: 1,
-  commands: { verify: null, format: null },
+  commands: { setup: null, verify: null, format: null },
   tracks: { critical: { paths: [] }, quick: { max_files: 3 } },
   protected: [],
   tests: ['test/**', 'tests/**', '**/*.test.*', '**/*.spec.*', '**/*_test.*', '**/test_*.*'],
   limits: { rework: 3 },
 };
+
+const AGENT_TEAMS_FLAG = 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS';
+const WORKTREES_IGNORE = '.claude/worktrees/';
+const CLI_PERMISSION = 'Bash(sdlc *)';
+
+const UNREACHABLE_WARNING =
+  'This worktree has no .sdlc/, so the factory gates are off here. The main checkout ' +
+  'uses the factory: commit .sdlc/ to the base branch, then start a new worktree.';
 
 // A failure the user can act on, as opposed to a bug. `code` is the exit code.
 class SdlcError extends Error {
@@ -53,15 +63,42 @@ function sha256(file) {
   }
 }
 
-// Walks up from the working directory, so the CLI works from any subfolder.
+// Walks up from the working directory, so the CLI works from any subfolder. It
+// stops at the git boundary because a native worktree sits inside the main repo,
+// and walking past it would silently use the main checkout's .sdlc/.
 function findRoot(start) {
   let dir = path.resolve(start);
   for (;;) {
     if (fs.existsSync(path.join(dir, SDLC_DIR))) return dir;
+    if (fs.existsSync(path.join(dir, '.git'))) return null;
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
+}
+
+function gitTop(start) {
+  let dir = path.resolve(start);
+  for (;;) {
+    if (fs.existsSync(path.join(dir, '.git'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+// In a linked worktree `.git` is a file pointing at <main>/.git/worktrees/<name>.
+// Returns the main checkout when it uses the factory and this worktree can't see
+// it, which happens when .sdlc/ was never committed to the base branch.
+function unreachableFactory(start) {
+  const top = gitTop(start);
+  if (!top || findRoot(start)) return null;
+  const marker = path.join(top, '.git');
+  if (!fs.statSync(marker).isFile()) return null;
+  const match = /^gitdir: (.+)\.git\/worktrees\//m.exec(fs.readFileSync(marker, 'utf8'));
+  if (!match) return null;
+  const main = match[1].replace(/\/$/, '');
+  return fs.existsSync(path.join(main, SDLC_DIR)) ? main : null;
 }
 
 function workDir(root) {
@@ -79,21 +116,107 @@ function assertConfig(config) {
   if (!valid) throw new SdlcError(`${SDLC_DIR}/config.json doesn't match the expected shape`);
 }
 
-function loadConfig(root) {
-  const file = path.join(root, SDLC_DIR, 'config.json');
-  if (!fs.existsSync(file)) return DEFAULT_CONFIG;
-  const config = readJson(file, `${SDLC_DIR}/config.json`);
+function parseConfig(text) {
+  let config;
+  try {
+    config = JSON.parse(text);
+  } catch (error) {
+    throw new SdlcError(`can't read ${SDLC_DIR}/config.json: ${error.message}`);
+  }
   assertConfig(config);
   return config;
 }
 
-function init(cwd) {
+function loadConfig(root) {
+  const file = path.join(root, SDLC_DIR, 'config.json');
+  return fs.existsSync(file) ? parseConfig(fs.readFileSync(file, 'utf8')) : DEFAULT_CONFIG;
+}
+
+function git(root, args) {
+  try {
+    const options = { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] };
+    return execFileSync('git', args, options).trim();
+  } catch {
+    return null;
+  }
+}
+
+// Null outside a repo or before the first commit, where work can't be tied to a branch.
+function currentBranch(root) {
+  return git(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
+}
+
+function ignoreWorktrees(root) {
+  const file = path.join(root, '.gitignore');
+  const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  if (existing.split('\n').includes(WORKTREES_IGNORE)) return;
+  const separator = existing === '' || existing.endsWith('\n') ? '' : '\n';
+  fs.writeFileSync(file, `${existing}${separator}${WORKTREES_IGNORE}\n`);
+}
+
+// A plugin can't ship settings, so the project has to turn agent teams on itself.
+// Allowing the CLI is safe because it can't approve or abandon anything.
+function writeProjectSettings(root) {
+  const dir = path.join(root, '.claude');
+  const file = path.join(dir, 'settings.json');
+  const settings = fs.existsSync(file) ? readJson(file, '.claude/settings.json') : {};
+  const allow = settings.permissions?.allow ?? [];
+  fs.mkdirSync(dir, { recursive: true });
+  writeJson(file, {
+    ...settings,
+    env: { ...settings.env, [AGENT_TEAMS_FLAG]: '1' },
+    permissions: { ...settings.permissions, allow: [...new Set([...allow, CLI_PERMISSION])] },
+  });
+}
+
+function init(cwd, { commands = {}, critical = [], protected: guarded = [] } = {}) {
   const existing = findRoot(cwd);
   if (existing) throw new SdlcError(`factory already initialized at ${existing}`);
-  const root = path.resolve(cwd);
+  const root = gitTop(cwd) ?? path.resolve(cwd);
+  writeProjectSettings(root);
+  ignoreWorktrees(root);
   fs.mkdirSync(workDir(root), { recursive: true });
-  writeJson(path.join(root, SDLC_DIR, 'config.json'), DEFAULT_CONFIG);
+  const given = Object.fromEntries(Object.entries(commands).filter(([, value]) => value));
+  writeJson(path.join(root, SDLC_DIR, 'config.json'), {
+    ...DEFAULT_CONFIG,
+    commands: { ...DEFAULT_CONFIG.commands, ...given },
+    tracks: { ...DEFAULT_CONFIG.tracks, critical: { paths: critical } },
+    protected: guarded,
+  });
   return root;
+}
+
+// Kept in the worktree's own git directory, so it never gets committed and each
+// worktree tracks its own setup. Recording the command reruns setup if it changes.
+function setupMarker(root) {
+  const file = git(root, ['rev-parse', '--git-path', 'sdlc-setup']);
+  return file === null ? null : path.resolve(root, file);
+}
+
+// Counts how often one agent has been sent back, in the worktree's git directory.
+function countStopBlock(root, agentId) {
+  const safe = String(agentId).replace(/[^\w-]/g, '_');
+  const file = path.resolve(root, git(root, ['rev-parse', '--git-path', `sdlc-stops-${safe}`]) ?? '.sdlc-stops');
+  const count = (fs.existsSync(file) ? Number(fs.readFileSync(file, 'utf8')) : 0) + 1;
+  fs.writeFileSync(file, String(count));
+  return count;
+}
+
+function isLinkedWorktree(root) {
+  const marker = path.join(root, '.git');
+  return fs.existsSync(marker) && fs.statSync(marker).isFile();
+}
+
+function setupPending(root) {
+  const command = loadConfig(root).commands?.setup;
+  if (!command || !isLinkedWorktree(root)) return false;
+  const marker = setupMarker(root);
+  return marker !== null && (!fs.existsSync(marker) || fs.readFileSync(marker, 'utf8') !== command);
+}
+
+function markSetupDone(root, command) {
+  const marker = setupMarker(root);
+  if (marker !== null) fs.writeFileSync(marker, command);
 }
 
 function loadItem(root, id) {
@@ -131,19 +254,26 @@ function resolveId(root, query) {
   throw new SdlcError(`no work item '${query}'`);
 }
 
+// A work item belongs to the branch it was created on, so each worktree session
+// sees only its own work. An item with no branch was made outside git.
+function ownItems(root) {
+  const branch = currentBranch(root);
+  return listIds(root)
+    .map((id) => loadItem(root, id))
+    .filter((item) => !item.branch || item.branch === branch);
+}
+
 // With no id given, the single open item is the active one. Choosing between
 // several is left to the caller rather than guessed at here.
 function activeItem(root, query) {
   if (query) return loadItem(root, resolveId(root, query));
-  const open = listIds(root)
-    .map((id) => loadItem(root, id))
-    .filter((item) => item.stage !== DONE);
+  const open = ownItems(root).filter(isOpen);
   if (open.length === 1) return open[0];
-  if (open.length === 0) throw new SdlcError('no open work items');
+  if (open.length === 0) throw new SdlcError('no open work items on this branch');
   throw new SdlcError(`several open work items, so name one: ${open.map((i) => i.id).join(', ')}`);
 }
 
-function createItem(root, slug, track, stage) {
+function createItem(root, slug, track, stage, files = []) {
   if (!SLUG.test(slug)) {
     throw new SdlcError(`invalid slug '${slug}': use lowercase letters, digits, and hyphens`, 2);
   }
@@ -156,7 +286,8 @@ function createItem(root, slug, track, stage) {
     if (error.code === 'EEXIST') throw new SdlcError(`work item ${id} already exists`);
     throw error;
   }
-  const item = { id, track, stage, rework: 0, history: [] };
+  const base = git(root, ['rev-parse', 'HEAD']);
+  const item = { id, track, stage, branch: currentBranch(root), base, files, rework: 0, history: [] };
   saveItem(root, item);
   return item;
 }
@@ -183,6 +314,64 @@ function saveApproval(root, item, record) {
   saveItem(root, { ...item, history: [...item.history, event] });
 }
 
+// The team config is where Claude Code records each teammate's agent type. It
+// exists only while a team is running, so a missing file means no team.
+function readTeam(sessionId) {
+  if (!/^[\w-]+$/.test(sessionId ?? '')) return null;
+  const home = process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude');
+  const file = path.join(home, 'teams', `session-${sessionId.slice(0, 8)}`, 'config.json');
+  return fs.existsSync(file) ? readJson(file, 'the team config') : null;
+}
+
+function headCommit(root) {
+  return git(root, ['rev-parse', 'HEAD']);
+}
+
+function readArtifact(root, item, artifact) {
+  const file = path.join(workDir(root), item.id, artifact);
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+}
+
+const NOT_FACTORY = ':(exclude).sdlc';
+
+// Committed, staged, unstaged, and untracked changes since `base`, so moving work
+// into a commit can't take it out of view.
+function changedFiles(root, base) {
+  if (!base) return [];
+  const tracked = git(root, ['diff', '--name-only', '--no-renames', base, '--', '.', NOT_FACTORY]);
+  const untracked = git(root, ['ls-files', '-o', '--exclude-standard', '--', '.', NOT_FACTORY]);
+  return [...`${tracked ?? ''}\n${untracked ?? ''}`.split('\n').filter(Boolean)].sort();
+}
+
+// Changes when the code changes, so verify evidence can't outlive what it tested.
+// It hashes file contents, so committing the same code doesn't change it.
+function codeFingerprint(root, base) {
+  if (!base) return null;
+  const hash = crypto.createHash('sha256');
+  for (const file of changedFiles(root, base)) hash.update(`${file}\0${sha256(path.join(root, file)) ?? ''}`);
+  return hash.digest('hex');
+}
+
+const FINGERPRINT_LINE = /^code: ([0-9a-f]{64})$/m;
+
+// Evidence from sdlc verify names the code it tested. Once that code changes, or
+// if the line is missing, the evidence no longer counts.
+function verifyIsCurrent(root, item, file) {
+  const expected = codeFingerprint(root, item.base);
+  if (expected === null) return true;
+  return FINGERPRINT_LINE.exec(fs.readFileSync(file, 'utf8'))?.[1] === expected;
+}
+
+function writeEvidence(root, item, name, text) {
+  const file = path.join(workDir(root), item.id, 'evidence', name);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, text);
+}
+
+function removeEvidence(root, item, name) {
+  fs.rmSync(path.join(workDir(root), item.id, 'evidence', name), { force: true });
+}
+
 // Gathers what `nextAction` needs to know about one item from the disk.
 function readFacts(root, item) {
   const dir = path.join(workDir(root), item.id);
@@ -190,7 +379,12 @@ function readFacts(root, item) {
   const approvals = {};
   for (const { stage } of FLOWS[item.track]) {
     const artifact = ARTIFACTS[stage];
-    if (artifact) artifacts[artifact] = sha256(path.join(dir, artifact));
+    if (artifact) {
+      const file = path.join(dir, artifact);
+      const hash = sha256(file);
+      const stale = hash !== null && artifact === ARTIFACTS.verify && !verifyIsCurrent(root, item, file);
+      artifacts[artifact] = stale ? null : hash;
+    }
     approvals[stage] = readApproval(path.join(dir, 'approvals', `${stage}.json`));
   }
   return { artifacts, approvals };
@@ -207,16 +401,30 @@ function readApproval(file) {
 
 module.exports = {
   SdlcError,
+  UNREACHABLE_WARNING,
   activeItem,
   archiveEvidence,
+  changedFiles,
+  codeFingerprint,
+  countStopBlock,
   createItem,
   findRoot,
+  headCommit,
   init,
   listIds,
+  removeEvidence,
+  writeEvidence,
+  markSetupDone,
+  parseConfig,
+  ownItems,
   loadConfig,
   loadItem,
+  readArtifact,
   readFacts,
+  readTeam,
   resolveId,
   saveApproval,
   saveItem,
+  setupPending,
+  unreachableFactory,
 };

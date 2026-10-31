@@ -97,6 +97,12 @@ test('commands outside the factory are refused', (t) => {
   assert.match(result.stderr, /sdlc init/);
 });
 
+test('init works outside git', (t) => {
+  const dir = tempDir(t);
+  assert.equal(run(['init'], dir).status, 0);
+  assert.equal(status(dir).root, dir);
+});
+
 test('init refuses to run twice', (t) => {
   assert.equal(run(['init'], repo(t)).status, 1);
 });
