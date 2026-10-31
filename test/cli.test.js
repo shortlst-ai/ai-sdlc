@@ -163,7 +163,7 @@ test('advance follows the gates and refuses until each passes', (t) => {
   assert.equal(status(cwd).next.action, 'approve');
   result = run(['advance'], cwd);
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /a person must approve spec/);
+  assert.match(result.stderr, /a person must type \/sdlc:approve for spec/);
 
   approve(cwd, id, 'spec', 'spec.md');
   assert.equal(run(['advance'], cwd).status, 0);

@@ -156,8 +156,8 @@ function describeNext(next) {
       return `write ${next.artifact} for the ${next.stage} stage`;
     case 'approve':
       return next.stale
-        ? `${next.artifact} changed after approval, so ${next.stage} needs approving again`
-        : `a person must approve ${next.stage}`;
+        ? `${next.artifact} changed after approval, so a person must type /sdlc:approve again for ${next.stage}`
+        : `a person must type /sdlc:approve for ${next.stage}`;
     case 'advance':
       return `advance to ${next.to}`;
     default:
