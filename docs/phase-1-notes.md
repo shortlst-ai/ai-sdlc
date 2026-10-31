@@ -24,6 +24,7 @@ What the first real runs showed, for the Phase 2 review. These are observations 
 - **A quick item couldn't add a file.** The fix needed a third file, and `sdlc track --files` didn't record it. Fixed: it now adds to the item and judges the track on all files.
 - **A permission prompt can stall a session silently.** Reading the plugin's source outside the working directory stopped one run for 8 minutes. Agents shouldn't need that source, so the CLI help should answer those questions.
 - **A lead can stall after a teammate reports back.** One rehearsal item with no brief stopped after its researcher finished and never wrote a spec. It hasn't been reproduced with a real brief, so watch for it.
+- **Long-lived sessions lose their login.** A session waiting at a gate for about five hours came back "Not logged in", so a slow human gate can outlast the session. The work was safe, because finishing an item only needs the CLI, and a resumed session should pick up.
 - **The `critical` track can't finish yet.** It has no `release` skill, so a repo can't safely configure critical paths.
 
 ## Small fixes to make
