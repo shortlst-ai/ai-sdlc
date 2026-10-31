@@ -73,11 +73,21 @@ function auditItem(root, id, base, config) {
   return problems.map((problem) => `${id}: ${problem}`);
 }
 
+function hasConfig(cwd, ref) {
+  return git(cwd, ['cat-file', '-e', `${ref}:.sdlc/config.json`]) !== null;
+}
+
+// Whether a repo uses the factory is the base's fact, not the change's: a change
+// that deletes the config must not be able to answer "no" for itself. Committed
+// files decide, so leftover folders on disk don't matter either way.
 function runGates(cwd, ref) {
+  const base = git(cwd, ['merge-base', ref, 'HEAD']);
+  if (!base) throw new SdlcError(`can't find a merge base with ${ref}: is the history fetched?`);
+  if (hasConfig(cwd, base) && !hasConfig(cwd, 'HEAD')) {
+    return { factory: true, items: [], problems: ['this change removes the factory config'] };
+  }
   const root = workspace.findRoot(cwd);
   if (!root) return { factory: false, items: [], problems: [] };
-  const base = git(root, ['merge-base', ref, 'HEAD']);
-  if (!base) throw new SdlcError(`can't find a merge base with ${ref}: is the history fetched?`);
   const config = configAt(root, base);
   const items = touchedItems(root, base);
   const problems = items.flatMap((id) => auditItem(root, id, base, config));
