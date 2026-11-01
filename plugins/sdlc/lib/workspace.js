@@ -397,7 +397,9 @@ function changedFiles(root, base) {
 }
 
 // Changes when the code changes, so verify evidence can't outlive what it tested.
-// It hashes file contents, so committing the same code doesn't change it.
+// It hashes file contents, so committing the same code doesn't change it. Untracked
+// files don't count, because running tests can write caches, and those would make
+// good evidence look stale.
 function changedLines(root, base) {
   if (!base) return 0;
   const output = git(root, ['diff', '--numstat', base, '--', '.', NOT_FACTORY]) ?? '';
@@ -413,7 +415,10 @@ function changedLines(root, base) {
 function codeFingerprint(root, base) {
   if (!base) return null;
   const hash = crypto.createHash('sha256');
-  for (const file of changedFiles(root, base)) hash.update(`${file}\0${sha256(path.join(root, file)) ?? ''}`);
+  const tracked = git(root, ['diff', '--name-only', '--no-renames', base, '--', '.', NOT_FACTORY]) ?? '';
+  for (const file of tracked.split('\n').filter(Boolean).sort()) {
+    hash.update(`${file}\0${sha256(path.join(root, file)) ?? ''}`);
+  }
   return hash.digest('hex');
 }
 

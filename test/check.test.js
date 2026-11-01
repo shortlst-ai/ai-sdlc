@@ -273,6 +273,7 @@ describe('sdlc verify', () => {
     touch(cwd, 'src/api/a.py');
     passReview(cwd);
     assert.equal(sdlc(cwd, 'advance').status, 0);
+    commitAll(cwd);
     return cwd;
   }
 
@@ -312,11 +313,35 @@ describe('sdlc verify', () => {
     assert.match(result.stderr, /write evidence\/verify\.md/);
   });
 
-  test('committing the code doesn\'t invalidate evidence', (t) => {
-    const cwd = atVerify(t, 'true');
-    sdlc(cwd, 'verify');
+  test('committing the same code doesn\'t invalidate evidence', (t) => {
+    const cwd = atVerify(t);
+    touch(cwd, 'src/api/a.py', 'edited\n');
+    assert.equal(sdlc(cwd, 'verify').status, 0);
     commitAll(cwd);
     assert.equal(sdlc(cwd, 'advance').status, 0);
+  });
+
+  test('files a test run leaves behind don\'t make good evidence look stale', (t) => {
+    const cwd = atVerify(t);
+    assert.equal(sdlc(cwd, 'verify').status, 0);
+    touch(cwd, 'src/api/__pycache__/a.pyc', 'bytecode\n');
+    assert.equal(sdlc(cwd, 'advance').status, 0);
+    assert.equal(state(cwd).stage, 'review');
+  });
+
+  test('a code change after verify still counts, once it\'s in Git', (t) => {
+    const cwd = atVerify(t);
+    assert.equal(sdlc(cwd, 'verify').status, 0);
+    touch(cwd, 'src/api/a.py', 'sneaky change\n');
+    assert.match(sdlc(cwd, 'advance').stderr, /write evidence\/verify\.md/);
+  });
+
+  test('an untracked file can\'t reach the base branch without invalidating evidence', (t) => {
+    const cwd = atVerify(t);
+    assert.equal(sdlc(cwd, 'verify').status, 0);
+    touch(cwd, 'src/api/new.py', 'never tested\n');
+    commitAll(cwd);
+    assert.match(sdlc(cwd, 'advance').stderr, /write evidence\/verify\.md/);
   });
 
   test('a hand-written verify.md doesn\'t count', (t) => {

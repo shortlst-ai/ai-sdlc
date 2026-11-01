@@ -81,6 +81,7 @@ function finished(t, options) {
   touch(cwd, 'src/a.py');
   touch(cwd, item('evidence/reviews/S1.md'), 'Verdict: pass\n');
   sdlc(cwd, 'advance');
+  commitAll(cwd);
   sdlc(cwd, 'verify');
   sdlc(cwd, 'advance');
   touch(cwd, item('evidence/review.md'), 'pass');
@@ -189,6 +190,7 @@ function reviewed(t, report) {
   touch(cwd, 'src/a.py');
   touch(cwd, item('evidence/reviews/S1.md'), 'Verdict: pass\n');
   sdlc(cwd, 'advance');
+  commitAll(cwd);
   sdlc(cwd, 'verify');
   sdlc(cwd, 'advance');
   touch(cwd, item('evidence/review.md'), report);
@@ -234,6 +236,7 @@ test('a critical change can pass every gate through to release', (t) => {
   touch(cwd, 'src/a.py');
   write('evidence/reviews/S1.md', 'Verdict: pass\n');
   assert.equal(sdlc(cwd, 'advance').status, 0);
+  commitAll(cwd);
   assert.equal(sdlc(cwd, 'verify').status, 0);
   assert.equal(sdlc(cwd, 'advance').status, 0);
   write('evidence/review.md', 'Verdict: pass\n');
