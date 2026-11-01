@@ -248,8 +248,9 @@ This is new software, so here's what has and hasn't been tested.
 
 **Not proven yet**
 
-- **This one-path process hasn't shipped a real change.** Those three changes used the older tracks. It's tested, but not yet used in anger
+- **This one-path process hasn't shipped a real change.** Those three changes used the older tracks. It has run start to finish in a real session, on a throwaway repo, in under six minutes
 - **Test-first is an instruction, not a lock.** Agents are told to write the failing test first, and nothing enforces it
+- **Verify evidence covers committed code.** Commit before `sdlc verify`, because uncommitted new files aren't counted
 - **The deploy stage isn't built.** It's parked until there's a project to deploy, and a way to separate the agent from the approver
 - **The CI monitor hasn't run on a live repo.** Its commands are tested, but the workflow itself hasn't run
 - **Some attacks are only tested locally.** Deleting `.sdlc/` is refused on a fresh clone, but hasn't been tried on GitHub, and neither has a pull request that edits `sdlc-gates.yml`
