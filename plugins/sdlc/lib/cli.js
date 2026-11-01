@@ -8,6 +8,7 @@ const { parseArgs } = require('node:util');
 const { reviewBuild } = require('./check');
 const { runGates } = require('./gates');
 const machine = require('./machine');
+const { coverage, detect, intentFor, slugFor } = require('./detect');
 const { collect } = require('./metrics');
 const workspace = require('./workspace');
 
@@ -33,6 +34,10 @@ Commands:
                                      Tracks can never be lowered
   gates --base <ref> [--json]        Recheck every gate, for CI
   metrics [--since <date>] [--json]  Summarize delivery from Git history
+  detect --runs <file> --branch <b> [--json]
+                                     Compare CI runs to the limits in config
+  breach --runs <file> --branch <b> [--json]
+                                     Open a work item for each limit broken
   --version                          Print the plugin version
   --help                             Print this help
 
@@ -45,6 +50,8 @@ const OPTIONS = {
   reason: { type: 'string' },
   since: { type: 'string' },
   base: { type: 'string' },
+  runs: { type: 'string' },
+  branch: { type: 'string' },
   setup: { type: 'string' },
   verify: { type: 'string' },
   format: { type: 'string' },
@@ -297,6 +304,56 @@ function metrics(positionals, values) {
   return 0;
 }
 
+// The runs come from `gh run list --json`, which the workflow fetches.
+function breaches(values) {
+  if (!values.runs || !values.branch) throw new SdlcError('this needs --runs and --branch', 2);
+  let runs;
+  try {
+    runs = JSON.parse(fs.readFileSync(values.runs, 'utf8'));
+  } catch (error) {
+    throw new SdlcError(`can't read ${values.runs}: ${error.message}`);
+  }
+  if (!Array.isArray(runs)) throw new SdlcError(`${values.runs} isn't a list of runs`);
+  const bands = workspace.bandsOf(workspace.loadConfig(workspace.findRoot(process.cwd()) ?? process.cwd()));
+  return { found: detect(runs, values.branch, bands), checked: coverage(runs, values.branch, bands) };
+}
+
+function detectCommand(positionals, values) {
+  const { found, checked } = breaches(values);
+  if (values.json) {
+    console.log(JSON.stringify({ breaches: found, checked }));
+    return 0;
+  }
+  if (checked.length === 0) {
+    console.log(`Nothing to judge: no workflow has enough finished runs on ${values.branch}.`);
+  } else if (found.length === 0) {
+    console.log(`Within limits: ${checked.join(', ')}`);
+  }
+  for (const breach of found) {
+    console.log(`${breach.workflow}: ${breach.failed} of ${breach.runs} runs failed, over the limit of ${breach.max}`);
+  }
+  return 0;
+}
+
+// Starts on the critical track so the work begins at the intent gate: a person
+// decides whether this is worth fixing before anything is built.
+function breachCommand(positionals, values) {
+  const root = requireRoot();
+  const open = workspace.openEverywhere(root).map(({ item }) => item.id.replace(/^\d+-/, ''));
+  const created = [];
+  for (const breach of breaches(values).found) {
+    const slug = slugFor(breach);
+    if (!open.includes(slug)) {
+      const item = workspace.createItem(root, slug, 'critical', machine.firstStage('critical'));
+      workspace.writeArtifact(root, item, 'intent.md', intentFor(breach));
+      created.push(item.id);
+    }
+  }
+  if (values.json) console.log(JSON.stringify({ created }));
+  else console.log(created.length === 0 ? 'No new breaches.' : `Opened ${created.join(', ')}`);
+  return 0;
+}
+
 function version() {
   const manifest = path.join(__dirname, '..', '.claude-plugin', 'plugin.json');
   return JSON.parse(fs.readFileSync(manifest, 'utf8')).version;
@@ -335,6 +392,8 @@ function dispatch(argv) {
     track,
     gates,
     metrics,
+    detect: detectCommand,
+    breach: breachCommand,
   };
   if (!Object.hasOwn(commands, command)) {
     throw new SdlcError(`unknown command '${command}'\n\n${USAGE}`, 2);
