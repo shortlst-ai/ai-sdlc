@@ -214,7 +214,6 @@ Skill and workflow names must not overlap (section 3).
 ```text
 .sdlc/
 ├── config.json                  commands, tracks, protected paths, limits
-├── bands.yaml                   maintain-stage control bands (later phase)
 └── work/0042-claims-status/
     ├── intent.md  spec.md  plan.md
     ├── state.json               written only by the CLI
@@ -270,7 +269,7 @@ The config is JSON, not YAML. Node has no built-in YAML parser, and a hand-writt
 | `sdlc-gates.yml` | **Required check.** Recomputes approval hashes, confirms the diff is within plan scope, confirms the right artifacts exist for the track, and rejects test edits on fix tasks. This is what makes the local gates real. It uses `pull_request_target`, so a change can't edit the workflow judging it, and it reads the change's files without running them |
 | `sdlc-review.yml` | Review against `REVIEW.md`, using `claude-code-action` or managed Code Review |
 | `sdlc-evals.yml` | Run `claude plugin eval` when skills, hooks, or `CLAUDE.md` change |
-| `sdlc-monitor.yml` | Later phase: cron detection, `claude -p` diagnosis, opens an intent PR |
+| `sdlc-monitor.yml` | Daily detection in plain code, opens an intent PR, and adds a `claude -p` diagnosis when an API key is set |
 
 ### Reuse rather than build
 
@@ -328,6 +327,7 @@ All of these come from Git, the PR history, and CI. `sdlc metrics` reports the G
 | Bash gates are incomplete, since command matching is best effort | Treat them as feedback only; CI is the control |
 | Local approvals can be forged by an agent with Bash, by writing the file directly or running `claude -p` | `/sdlc:approve` has no CLI path and refuses unattended sessions, and `sdlc gates` catches a wrong hash, but an agent that computes the right hash and fills in a name still passes. Accepted for solo use. On a team, the real approval is the PR review |
 | A change that edits only `.sdlc/config.json` passes `sdlc gates`, so loosened rules apply from the next change on | The gate judges each change by the base's rules, which stops a change loosening its own. Review the file in every PR that touches it. Blocking it outright would also stop people changing it |
+| CI logs can contain text from anyone who opened a PR, and the diagnoser reads them | It's read-only, its instructions treat logs as untrusted, and an eval plants an instruction in a log. In 8 runs it ignored the instruction 7 times, and the eighth is unexplained. The intent gate refuses any advance regardless |
 | A PR that edits `sdlc-gates.yml` hasn't been tested live, and neither has deleting `.sdlc/` | `pull_request_target` takes the workflow from the base branch, and the deletion check passes on a fresh clone. Run both attacks on the first repo that uses the factory with this check required |
 | Hook latency in every session | Immediate exit without `.sdlc/`; hooks kept fast and measured |
 | Infinite block loops at `SubagentStop` | Retry budget, then escalate |

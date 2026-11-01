@@ -21,6 +21,7 @@ const DEFAULT_CONFIG = {
   protected: [],
   tests: ['test/**', 'tests/**', '**/*.test.*', '**/*.spec.*', '**/*_test.*', '**/test_*.*'],
   limits: { rework: 3 },
+  bands: { ci_failure_rate: { max: 0.25, window: 20, min_runs: 5 } },
 };
 
 const AGENT_TEAMS_FLAG = 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS';
@@ -130,6 +131,11 @@ function parseConfig(text) {
 function loadConfig(root) {
   const file = path.join(root, SDLC_DIR, 'config.json');
   return fs.existsSync(file) ? parseConfig(fs.readFileSync(file, 'utf8')) : DEFAULT_CONFIG;
+}
+
+// Repos set up before bands existed have none in their config.
+function bandsOf(config) {
+  return config.bands ?? DEFAULT_CONFIG.bands;
 }
 
 function git(root, args) {
@@ -371,6 +377,10 @@ function headCommit(root) {
   return git(root, ['rev-parse', 'HEAD']);
 }
 
+function writeArtifact(root, item, artifact, text) {
+  fs.writeFileSync(path.join(workDir(root), item.id, artifact), text);
+}
+
 function readArtifact(root, item, artifact) {
   const file = path.join(workDir(root), item.id, artifact);
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
@@ -450,6 +460,7 @@ module.exports = {
   UNREACHABLE_WARNING,
   activeItem,
   archiveEvidence,
+  bandsOf,
   changedFiles,
   codeFingerprint,
   countStopBlock,
@@ -477,4 +488,5 @@ module.exports = {
   setupPending,
   unreachableFactory,
   waitMarker,
+  writeArtifact,
 };
