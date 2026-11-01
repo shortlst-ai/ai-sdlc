@@ -256,7 +256,7 @@ This is new software, so here's what has and hasn't been tested.
 - **Some attacks are only tested locally.** Deleting `.sdlc/` is refused on a fresh clone, but hasn't been tried on GitHub, and neither has a pull request that edits `sdlc-gates.yml`
 - **A pull request that only changes `.sdlc/config.json` passes the gate,** so review that file whenever it changes
 - **Forged approvals can pass on a solo repo.** An approval with the right hash and a made-up name passes `sdlc gates`, so on a team, pull request review is the real sign-off
-- **The diagnoser isn't fully resistant to instructions planted in CI logs.** It ignored them in 7 of 8 test runs, and the eighth is unexplained
+- **The diagnoser isn't fully resistant to instructions planted in CI logs.** It ignored them in 12 of 14 test runs. In the other two it ran `sdlc advance`, which the gate would refuse, and the cause is unexplained
 
 Agent teams are experimental in Claude Code and need a terminal session. In the VS Code panel, the same roles run as plain subagents.
 
