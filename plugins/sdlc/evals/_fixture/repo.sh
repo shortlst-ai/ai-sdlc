@@ -40,6 +40,11 @@ base_repo() {
   commit 'Adopt the factory'
 }
 
+on_a_worktree_branch() {
+  base_repo
+  git switch -q -c worktree-feature
+}
+
 at_spec_gate() {
   base_repo
   git switch -q -c worktree-feature

@@ -5,7 +5,7 @@ const { execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { test } = require('node:test');
+const { describe, test } = require('node:test');
 
 const PLUGIN = path.join(__dirname, '..', 'plugins', 'sdlc');
 const CLI = path.join(PLUGIN, 'bin', 'sdlc');
@@ -336,4 +336,66 @@ test('hooks.json wires every event and doesn\'t fail closed outside the factory'
   for (const entry of [...hooks.PreToolUse, ...hooks.PostToolUse, ...hooks.SessionStart]) {
     assert.equal(entry.hooks[0].onFailure, undefined);
   }
+});
+
+describe('a session that stops with work left', () => {
+  function stopped(cwd, extra = {}, extraEnv = {}) {
+    const input = { cwd, background_tasks: [], stop_hook_active: false, ...extra };
+    const { CLAUDE_CODE_SESSION_ATTENDED, ...rest } = env();
+    return spawnSync('node', [HOOK, 'stop'], {
+      input: JSON.stringify(input),
+      encoding: 'utf8',
+      env: { ...rest, ...extraEnv },
+    });
+  }
+
+  test('gets sent back once, naming the next step', (t) => {
+    const cwd = factory(t);
+    sdlc(cwd, 'new', 'feature');
+    const output = JSON.parse(stopped(cwd).stdout);
+    assert.equal(output.decision, 'block');
+    assert.match(output.reason, /0001-feature still has work.*write intent\.md.*\/sdlc:next/);
+  });
+
+  test('a second stop goes through, so it can\'t loop', (t) => {
+    const cwd = factory(t);
+    sdlc(cwd, 'new', 'feature');
+    assert.equal(stopped(cwd, { stop_hook_active: true }).stdout, '');
+  });
+
+  test('a lead waiting on teammates is left alone', (t) => {
+    const cwd = factory(t);
+    sdlc(cwd, 'new', 'feature');
+    const tasks = [{ id: 't1', type: 'teammate', status: 'running' }];
+    assert.equal(stopped(cwd, { background_tasks: tasks }).stdout, '');
+  });
+
+  test('with no task list it can\'t tell, so it does nothing', (t) => {
+    const cwd = factory(t);
+    sdlc(cwd, 'new', 'feature');
+    assert.equal(stopped(cwd, { background_tasks: undefined }).stdout, '');
+  });
+
+  test('a gate is left alone, because that one needs a person', (t) => {
+    const cwd = factory(t);
+    sdlc(cwd, 'new', 'feature');
+    fs.writeFileSync(path.join(cwd, '.sdlc', 'work', '0001-feature', 'intent.md'), 'intent');
+    assert.equal(stopped(cwd).stdout, '');
+  });
+
+  test('an unattended session is left alone', (t) => {
+    const cwd = factory(t);
+    sdlc(cwd, 'new', 'feature');
+    assert.equal(stopped(cwd, {}, { CLAUDE_CODE_SESSION_ATTENDED: '0' }).stdout, '');
+  });
+
+  test('nothing open means nothing to say', (t) => {
+    assert.equal(stopped(factory(t)).stdout, '');
+  });
+
+  test('outside the factory it stays quiet', (t) => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stop-')));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    assert.equal(stopped(dir).stdout, '');
+  });
 });

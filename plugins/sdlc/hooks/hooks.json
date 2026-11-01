@@ -98,6 +98,14 @@
             ],
             "asyncRewake": true,
             "timeout": 86400
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/hook.js",
+              "stop"
+            ]
           }
         ]
       }
