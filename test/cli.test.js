@@ -114,7 +114,7 @@ test('new creates a standard item by default and numbers in order', (t) => {
   const { items } = status(cwd);
   assert.deepEqual(items.map((item) => item.id), ['0001-first', '0002-second']);
   assert.equal(items[0].track, 'standard');
-  assert.equal(items[0].stage, 'spec');
+  assert.equal(items[0].stage, 'intent');
 });
 
 test('new rejects slugs that could escape the work folder', (t) => {
@@ -125,10 +125,17 @@ test('new rejects slugs that could escape the work folder', (t) => {
   assert.deepEqual(status(cwd).items, []);
 });
 
-test('files decide the track', (t) => {
+test('a small change takes the same path as any other', (t) => {
   const cwd = repo(t);
   assert.equal(run(['new', 'fix', '--files', 'a.py,b.py'], cwd).status, 0);
-  assert.equal(status(cwd).items[0].track, 'quick');
+  assert.equal(status(cwd).items[0].stage, 'intent');
+});
+
+test('nothing can start on the old quick track', (t) => {
+  const cwd = repo(t);
+  const result = run(['new', 'fix', '--track', 'quick'], cwd);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /use standard, critical/);
 });
 
 test('critical paths in config raise the track', (t) => {
@@ -144,9 +151,13 @@ test('critical paths in config raise the track', (t) => {
 test('new may raise the track but never lower it', (t) => {
   const cwd = repo(t);
   assert.equal(run(['new', 'a', '--track', 'critical'], cwd).status, 0);
-  const lowered = run(['new', 'b', '--track', 'quick'], cwd);
+  const file = path.join(cwd, '.sdlc', 'config.json');
+  const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+  config.tracks.critical.paths = ['src/auth/**'];
+  fs.writeFileSync(file, JSON.stringify(config));
+  const lowered = run(['new', 'b', '--track', 'standard', '--files', 'src/auth/a.py'], cwd);
   assert.equal(lowered.status, 1);
-  assert.match(lowered.stderr, /at least the 'standard' track/);
+  assert.match(lowered.stderr, /at least the 'critical' track/);
   assert.equal(status(cwd).items.length, 1);
 });
 
@@ -157,7 +168,12 @@ test('advance follows the gates and refuses until each passes', (t) => {
 
   let result = run(['advance'], cwd);
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /write spec.md/);
+  assert.match(result.stderr, /write intent.md/);
+
+  write(cwd, id, 'intent.md');
+  assert.match(run(['advance'], cwd).stderr, /a person must type \/sdlc:approve for intent/);
+  approve(cwd, id, 'intent', 'intent.md');
+  assert.equal(run(['advance'], cwd).status, 0);
 
   write(cwd, id, 'spec.md');
   assert.equal(status(cwd).next.action, 'approve');
@@ -167,7 +183,7 @@ test('advance follows the gates and refuses until each passes', (t) => {
 
   approve(cwd, id, 'spec', 'spec.md');
   assert.equal(run(['advance'], cwd).status, 0);
-  assert.equal(status(cwd).items[0].stage, 'plan');
+  assert.equal(status(cwd).items[0].stage, 'build');
 
   write(cwd, id, 'spec.md', 'edited after approval');
   const next = status(cwd).next;
@@ -176,45 +192,54 @@ test('advance follows the gates and refuses until each passes', (t) => {
   assert.equal(run(['advance'], cwd).status, 1);
 });
 
-test('a full quick run reaches done and records its history', (t) => {
+// An item at build, past the two gates, with its only slice reviewed.
+function atBuild(cwd, slug = 'fix') {
+  run(['new', slug], cwd);
+  const id = `0001-${slug}`;
+  write(cwd, id, 'intent.md');
+  approve(cwd, id, 'intent', 'intent.md');
+  run(['advance'], cwd);
+  write(cwd, id, 'spec.md', '```scope\nsrc/**\n```\n');
+  approve(cwd, id, 'spec', 'spec.md');
+  run(['advance'], cwd);
+  write(cwd, id, 'evidence/reviews/S1.md', 'Verdict: pass\n');
+  return id;
+}
+
+test('a full run reaches done and records its history', (t) => {
   const cwd = repo(t);
-  run(['new', 'fix', '--files', 'a.py'], cwd);
-  const id = '0001-fix';
-  write(cwd, id, 'evidence/reproduce.md');
+  const id = atBuild(cwd);
   write(cwd, id, 'evidence/verify.md');
   write(cwd, id, 'evidence/review.md');
   approve(cwd, id, 'merge', 'evidence/review.md');
-  for (let i = 0; i < 5; i += 1) assert.equal(run(['advance'], cwd).status, 0);
+  for (let i = 0; i < 4; i += 1) assert.equal(run(['advance'], cwd).status, 0);
   assert.deepEqual(status(cwd).items[0].next, { action: 'none' });
   assert.equal(status(cwd).next.action, 'new');
-  assert.equal(readState(cwd, id).history.length, 5);
+  assert.equal(readState(cwd, id).history.filter((event) => event.to).length, 6);
   assert.equal(run(['advance', id], cwd).status, 1);
 });
 
 test('a forged approval with the wrong hash does not open a gate', (t) => {
   const cwd = repo(t);
   run(['new', 'feature'], cwd);
-  write(cwd, '0001-feature', 'spec.md');
-  write(cwd, '0001-feature', 'approvals/spec.json', JSON.stringify({ sha256: 'wrong' }));
+  write(cwd, '0001-feature', 'intent.md');
+  write(cwd, '0001-feature', 'approvals/intent.json', JSON.stringify({ sha256: 'wrong' }));
   assert.equal(run(['advance'], cwd).status, 1);
 });
 
 test('an unreadable approval does not open a gate', (t) => {
   const cwd = repo(t);
   run(['new', 'feature'], cwd);
-  write(cwd, '0001-feature', 'spec.md');
-  write(cwd, '0001-feature', 'approvals/spec.json', 'not json');
+  write(cwd, '0001-feature', 'intent.md');
+  write(cwd, '0001-feature', 'approvals/intent.json', 'not json');
   assert.equal(run(['advance'], cwd).status, 1);
 });
 
 test('rework needs a reason and records it', (t) => {
   const cwd = repo(t);
-  run(['new', 'fix', '--files', 'a.py'], cwd);
-  const id = '0001-fix';
+  const id = atBuild(cwd);
   assert.equal(run(['rework'], cwd).status, 2);
   assert.equal(run(['rework', '--reason', 'x'], cwd).status, 1);
-  write(cwd, id, 'evidence/reproduce.md');
-  run(['advance'], cwd);
   run(['advance'], cwd);
   assert.equal(run(['rework', '--reason', 'tests failed'], cwd).status, 0);
   const state = readState(cwd, id);
@@ -225,65 +250,40 @@ test('rework needs a reason and records it', (t) => {
 
 test('rework retires old evidence, so the next round must produce its own', (t) => {
   const cwd = repo(t);
-  run(['new', 'fix', '--files', 'a.py'], cwd);
-  const id = '0001-fix';
-  write(cwd, id, 'evidence/reproduce.md');
+  const id = atBuild(cwd);
   write(cwd, id, 'evidence/verify.md', 'round one');
   write(cwd, id, 'evidence/review.md', 'round one');
   approve(cwd, id, 'merge', 'evidence/review.md');
-  for (let i = 0; i < 3; i += 1) run(['advance'], cwd);
+  for (let i = 0; i < 2; i += 1) run(['advance'], cwd);
   assert.equal(readState(cwd, id).stage, 'review');
   assert.equal(run(['rework', '--reason', 'critical finding'], cwd).status, 0);
 
+  assert.match(run(['advance'], cwd).stderr, /slice S1 has no review/);
+  write(cwd, id, 'evidence/reviews/S1.md', 'Verdict: pass\n');
   assert.equal(run(['advance'], cwd).status, 0);
   const refused = run(['advance'], cwd);
   assert.equal(refused.status, 1);
   assert.match(refused.stderr, /write evidence\/verify.md/);
 
   const archive = path.join(itemDir(cwd, id), 'evidence', 'rework-1');
-  assert.deepEqual(fs.readdirSync(archive).sort(), ['merge.json', 'review.md', 'verify.md']);
+  assert.deepEqual(fs.readdirSync(archive).sort(), ['merge.json', 'review.md', 'reviews', 'verify.md']);
   assert.equal(fs.readFileSync(path.join(archive, 'verify.md'), 'utf8'), 'round one');
 
-  // The earlier reproduction stays, because it isn't about the code being reworked.
-  assert.equal(fs.existsSync(path.join(itemDir(cwd, id), 'evidence', 'reproduce.md')), true);
-});
+  });
 
 test('track raises from a name or from files, and never lowers', (t) => {
   const cwd = repo(t);
   run(['new', 'feature'], cwd);
-  assert.equal(run(['track', 'quick'], cwd).status, 1);
+  assert.equal(run(['track', 'standard'], cwd).status, 0);
   assert.equal(status(cwd).items[0].track, 'standard');
 
-  // These files classify as quick, which must not lower a standard item.
+  // Ordinary files must not change an ordinary item.
   assert.equal(run(['track', '--files', 'a.py'], cwd).status, 0);
   assert.equal(status(cwd).items[0].track, 'standard');
 
   assert.equal(run(['track', 'critical'], cwd).status, 0);
   assert.equal(status(cwd).items[0].track, 'critical');
-  assert.equal(status(cwd).items[0].stage, 'spec');
-});
-
-test('track adds files to a quick item and judges the track on all of them', (t) => {
-  const cwd = repo(t);
-  run(['new', 'a', '--files', 'a.py,a_test.py'], cwd);
-  const state = () => JSON.parse(fs.readFileSync(path.join(itemDir(cwd, '0001-a'), 'state.json'), 'utf8'));
-
-  assert.equal(run(['track', '--files', 'b.py'], cwd).status, 0);
-  assert.equal(state().track, 'quick');
-  assert.deepEqual(state().files, ['a.py', 'a_test.py', 'b.py']);
-  assert.deepEqual(state().history.at(-1).files, ['b.py']);
-
-  assert.equal(run(['track', '--files', 'c.py'], cwd).status, 0);
-  assert.equal(state().track, 'standard');
-  assert.deepEqual(state().files, ['a.py', 'a_test.py', 'b.py', 'c.py']);
-});
-
-test('track leaves the item alone when its files add nothing', (t) => {
-  const cwd = repo(t);
-  run(['new', 'a', '--files', 'a.py'], cwd);
-  assert.equal(run(['track', '--files', 'a.py'], cwd).status, 0);
-  const state = JSON.parse(fs.readFileSync(path.join(itemDir(cwd, '0001-a'), 'state.json'), 'utf8'));
-  assert.deepEqual(state.history, []);
+  assert.equal(status(cwd).items[0].stage, 'intent');
 });
 
 test('track needs a track or files', (t) => {
@@ -300,10 +300,10 @@ test('several open items must be named, and any unique number works', (t) => {
   const result = run(['advance'], cwd);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /several open work items/);
-  write(cwd, '0002-two', 'spec.md');
-  approve(cwd, '0002-two', 'spec', 'spec.md');
+  write(cwd, '0002-two', 'intent.md');
+  approve(cwd, '0002-two', 'intent', 'intent.md');
   assert.equal(run(['advance', '2'], cwd).status, 0);
-  assert.equal(status(cwd, '2').items[0].stage, 'plan');
+  assert.equal(status(cwd, '2').items[0].stage, 'spec');
 });
 
 test('the same number on two branches is reported as ambiguous', (t) => {

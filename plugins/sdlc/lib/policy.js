@@ -21,7 +21,6 @@ const READ_ONLY = 'read-only';
 
 const ROLE_SCOPES = {
   'spec-writer': SDLC_ONLY,
-  planner: SDLC_ONLY,
   verifier: TESTS_ONLY,
   researcher: READ_ONLY,
   reviewer: READ_ONLY,
@@ -46,14 +45,13 @@ function isBlockedEarlier({ item, next }) {
 }
 
 // Source changes only during build, so code can't change after verify without
-// going through rework. On the quick track the test comes first, then it locks,
-// so a fix can't weaken the check it has to pass.
+// going through rework.
 function stageAllows(entry, isTest, role) {
   const { item } = entry;
   if (isBlockedEarlier(entry)) return false;
   if (!isTest) return item.stage === 'build' && entry.next.action === 'advance';
   if (item.stage === 'verify' && role === 'verifier') return true;
-  return item.track === 'quick' ? item.stage === 'reproduce' : ['build', 'verify'].includes(item.stage);
+  return ['build', 'verify'].includes(item.stage);
 }
 
 function describeBlock(open) {

@@ -130,17 +130,17 @@ Each layer answers a different question, and only the bottom one holds against a
 
 **Approvals bind to content.** `/sdlc:approve` is human-only (tests 10 and 11). A hook records the SHA-256 of the artifact plus the approver. If the spec changes afterward, the approval no longer matches and the gate reopens. You approve the bytes, not the stage.
 
-**Scope comes from the plan, not from role names.** One stack-neutral `builder` replaces `backend-builder` and `frontend-builder`. `plan.md` declares which files each slice may touch, and `SubagentStop` compares that to the real diff (test 5). This is what makes the factory work on any stack.
+**Scope comes from the spec, not from role names.** One stack-neutral `builder` replaces `backend-builder` and `frontend-builder`. `plan.md` declares which files each slice may touch, and `SubagentStop` compares that to the real diff (test 5). This is what makes the factory work on any stack.
 
 **One work item is one branch, one native worktree, and one session with its agent team.** You start a change with `claude --worktree <slug>` in a new terminal. Claude Code creates `.claude/worktrees/<slug>/` on branch `worktree-<slug>`, and the item is created inside that session, so it lives on the branch from the start. Features can't collide, the main checkout stays clean, and hooks check only the current branch's item. The playbook's limit still applies: run only as many of these as you can review.
 
 The session is the team lead, and the factory's roles are teammates spawned from the plugin's agent definitions:
 
 - The lead holds the human gates, because teammates and subagents can't ask you anything.
-- Teammates share the worktree, so `plan.md` must give each builder a file set that doesn't overlap. Passing `isolation` makes a call launch as a plain subagent instead.
+- Teammates share the worktree, so the spec must give each builder a file set that doesn't overlap. Passing `isolation` makes a call launch as a plain subagent instead.
 - Teams don't survive `/resume`. The state is in Git, so a resumed lead respawns its teammates.
 - Teams are experimental, off by default, and interactive. `/sdlc:init` turns them on in project settings, and the skills also work with plain subagents, for CI and as a fallback.
-- Teammates cost more tokens than subagents and suit parallel work best. Whether `quick` needs a team at all is worth measuring in Phase 2.
+- Teammates cost more tokens than subagents and suit parallel work best. Whether a one-slice change needs a team at all is worth measuring in Phase 2.
 
 **Hooks stay fast.** Formatters run per file. The full test suite runs at `SubagentStop` for builders, not on every `Stop`, since that fires every turn. Every blocking loop has a retry budget, then escalates to a human.
 
@@ -149,7 +149,7 @@ The session is the team lead, and the factory's roles are teammates spawned from
 ## 5. Lifecycle
 
 ```text
- intent --G1--> spec --G2--> plan --G3--> build <-> verify --> review --G4--> release --G5--> observe
+ intent --G1--> spec --G2--> build, slice by slice <-> verify --> review --G3--> release --G4--> observe
     ^                                                                                           |
     +-------------------------- band breach writes a new intent.md <----------------------------+
 ```
@@ -157,26 +157,33 @@ The session is the team lead, and the factory's roles are teammates spawned from
 | Gate | Passes when | Decided by | Enforced at |
 | --- | --- | --- | --- |
 | G1 Intent | Problem and constraints are right | Product owner | Approval hash; CI re-check |
-| G2 Spec | Solves the intent; flagged concerns resolved | Product owner, policy owner if flagged | Approval hash; CI re-check |
-| G3 Plan | Files, order, tests, and rollback are concrete | Engineer, tech lead if high risk | Approval hash; no source edits before this |
-| Verify | Tests pass; scope matches the plan; tests unedited on fixes | Deterministic | `SubagentStop`, then required CI check |
-| Review | No critical findings; diff matches spec and plan | Read-only reviewer, then a person | Report only. Humans approve |
-| G4 Merge | Code owner approves | Human | Branch protection |
-| G5 Release | Named release authorization | Release manager | Environment protection in CI |
+| G2 Spec | Solves the intent; flagged concerns resolved; slices and their scope are right | Product owner, policy owner if flagged | Approval hash; CI re-check |
+| Slice review | Each slice passes a reviewer that saw none of the building | Read-only reviewer | `sdlc advance`, then CI re-check |
+| Verify | Tests pass; scope matches the spec | Deterministic | `SubagentStop`, then required CI check |
+| Review | No critical findings; the slices fit together | Read-only reviewer, then a person | Report only. Humans approve |
+| G3 Merge | Code owner approves. Skipped as a separate approval when the review is one plain pass, because a person merges anyway | Human | Branch protection |
+| G4 Release | Critical paths only. Named release authorization | Release manager | Environment protection in CI |
 
-### Tracks, to keep ceremony in proportion
+### One path, with risk adding sign-offs
 
-The track comes from `.sdlc/config.json` path rules, not from the model's judgment. The model may raise the track but never lower it.
+Every change takes the same path. Ceremony stays in proportion through the length of the documents, not by skipping steps: a typo fix gets a line of intent, a few lines of spec, and one slice.
 
-| Track | For | Stages | Human gates |
-| --- | --- | --- | --- |
-| `quick` | Small bug or tweak | Failing test, fix, verify, review | Merge only |
-| `standard` | Normal feature | Combined intent and spec, plan, build, verify, review | Spec, and merge only if the review didn't plainly pass |
-| `critical` | Auth, payments, migrations, regulated code | All stages, hidden scenarios, line-by-line human review | All five |
+Three tracks were built first, and real use argued against them. `quick` stalled on its only real run when a fix needed a file nobody had declared, `critical` was never used, and the value showed up in the spec gate. Choosing a track also added rules of its own.
 
-The `quick` track borrows the playbook's rule for bug fixes: commit a failing test first, then lock test files during the fix.
+| Stage | Who | Notes |
+| --- | --- | --- |
+| Intent | You approve | Stops a weak idea before a spec is written |
+| Spec, with slices | You approve | Replaces a separate plan, so you approve the scope itself |
+| Build | Agents | Slice by slice, test-first, each independently reviewed before the next starts |
+| Verify | Tool | Runs the tests and writes the evidence |
+| Review | Agent | How the slices fit together, and any later commits |
+| Merge | You | A person merges. A separate approval applies only if the review didn't plainly pass |
 
-On `standard`, a person still merges the change, so a clean review doesn't need signing off twice. The merge gate applies only when the report's verdict is anything other than one plain `pass`. `sdlc gates` rechecks this. The first real runs took 1.67 approvals per item, and `sdlc metrics` tracks that number.
+Paths listed under `tracks.critical` keep this path and add sign-offs: the merge always needs an approval, and so does a release. The `critical` label comes from config, not from the model's judgment, and can go up but never down.
+
+Mid-build findings have a route. New work becomes an issue, so the change stays small. A hole in the spec means amending it, which reopens the gate through the approval hash.
+
+Two costs were accepted. Small changes take more steps than `quick` did, and the failing-test rule moved from a lock enforced by code to an instruction in the skills.
 
 ---
 
@@ -194,11 +201,11 @@ ai-sdlc/                         this repo: a marketplace holding the plugin
     ├── lib/                     state machine, gates, metrics
     ├── skills/
     │   ├── init/  next/  status/       setup and orchestration
-    │   ├── intent/  spec/  plan/       Plan and Design stages
+    │   ├── intent/  spec/              Plan and Design stages
     │   ├── build/  verify/  review/    Build and Test stages
     │   ├── ship/  approve/             Deploy stage (approve is human-only)
     │   └── learn/                      turn repeat mistakes into rules
-    ├── agents/                  researcher, planner, spec-writer, builder,
+    ├── agents/                  researcher, spec-writer, builder,
     │                            verifier, reviewer, diagnoser
     ├── hooks/hooks.json
     ├── scripts/                 hook handlers, each with fixture tests
@@ -215,7 +222,7 @@ Skill and workflow names must not overlap (section 3).
 .sdlc/
 ├── config.json                  commands, tracks, protected paths, limits
 └── work/0042-claims-status/
-    ├── intent.md  spec.md  plan.md
+    ├── intent.md  spec.md
     ├── state.json               written only by the CLI
     ├── approvals/               hash, approver, timestamp
     └── evidence/                test output, review findings
@@ -227,8 +234,7 @@ CLAUDE.md   REVIEW.md   .github/workflows/sdlc-*.yml
   "version": 1,
   "commands": { "verify": "make test", "format": "make fmt FILE={file}" },
   "tracks": {
-    "critical": { "paths": ["src/auth/**", "migrations/**"] },
-    "quick": { "max_files": 3 }
+    "critical": { "paths": ["src/auth/**", "migrations/**"] }
   },
   "protected": ["src/gen/**"],
   "tests": ["tests/**", "**/test_*.py"],
@@ -244,7 +250,6 @@ The config is JSON, not YAML. Node has no built-in YAML parser, and a hand-writt
 | --- | --- | --- | --- |
 | `researcher` | Read, Grep, Glob | haiku | Never edits |
 | `spec-writer` | Read, Grep, Glob, Write | sonnet | `.sdlc/` only |
-| `planner` | Read, Grep, Glob, Write | opus | `.sdlc/` only |
 | `builder` | Read, Edit, Write, Bash | sonnet | Plan scope; no tests on fix tasks |
 | `verifier` | Read, Edit, Write, Bash | sonnet | Test files only; reports, never patches |
 | `reviewer` | Read, Grep, Glob | sonnet | Cannot edit, so it cannot approve its own work |
@@ -258,7 +263,7 @@ The config is JSON, not YAML. Node has no built-in YAML parser, and a hand-writt
 | `PreToolUse` Write/Edit | Allow source edits only during build, so a change after verify needs rework. Block protected paths and agent writes to `approvals/`, `state.json`, and the config |
 | `PreToolUse` Bash | Block `git push` to main, `--no-verify`, `gh pr merge`, and staged secrets. Best effort, backed by CI |
 | `PostToolUse` Write/Edit | Run the formatter on the changed file |
-| `SubagentStop` builder | Compare the diff to plan scope, run verify, block with the reason, retry within budget |
+| `SubagentStop` builder | Compare the diff to the spec's scope, run verify, block with the reason, retry within budget |
 | `UserPromptExpansion` | Record approvals for `/sdlc:approve` |
 | `Stop` | Wait in the background at a gate, then wake the session once a person approves |
 
@@ -266,7 +271,7 @@ The config is JSON, not YAML. Node has no built-in YAML parser, and a hand-writt
 
 | Workflow | Job |
 | --- | --- |
-| `sdlc-gates.yml` | **Required check.** Recomputes approval hashes, confirms the diff is within plan scope, confirms the right artifacts exist for the track, and rejects test edits on fix tasks. This is what makes the local gates real. It uses `pull_request_target`, so a change can't edit the workflow judging it, and it reads the change's files without running them |
+| `sdlc-gates.yml` | **Required check.** Recomputes approval hashes, confirms the diff is within the spec's scope, confirms the right artifacts exist for the track, and rejects test edits on fix tasks. This is what makes the local gates real. It uses `pull_request_target`, so a change can't edit the workflow judging it, and it reads the change's files without running them |
 | `sdlc-review.yml` | Review against `REVIEW.md`, using `claude-code-action` or managed Code Review |
 | `sdlc-evals.yml` | Run `claude plugin eval` when skills, hooks, or `CLAUDE.md` change |
 | `sdlc-monitor.yml` | Daily detection in plain code, opens an intent PR, and adds a `claude -p` diagnosis when an API key is set |
@@ -282,7 +287,7 @@ The config is JSON, not YAML. Node has no built-in YAML parser, and a hand-writt
 - **Playbook:** the artifact chain, sigma tiers, deterministic detection, and an eval for every incident.
 - **Handbook:** the critical-finding loop, and one feature per PR.
 - **Compound Engineering:** `/sdlc:learn`. Decide whether each repeat mistake belongs in `CLAUDE.md`, a skill, or a hook.
-- **StrongDM:** hidden scenarios for the `critical` track. These must live outside the repo to work, because a read gate can be bypassed through Bash, just as a write gate can.
+- **StrongDM:** hidden scenarios for critical paths. These must live outside the repo to work, because a read gate can be bypassed through Bash, just as a write gate can.
 
 ---
 
@@ -323,17 +328,17 @@ All of these come from Git, the PR history, and CI. `sdlc metrics` reports the G
 
 | Risk | Mitigation |
 | --- | --- |
-| The factory becomes the ceremony it's meant to replace | Tracks, and the review after Phase 2. `quick` must stay fast |
+| The factory becomes the ceremony it's meant to replace | Short documents for small changes, and measuring approvals per item. A small fix must stay fast |
 | Bash gates are incomplete, since command matching is best effort | Treat them as feedback only; CI is the control |
 | Local approvals can be forged by an agent with Bash, by writing the file directly or running `claude -p` | `/sdlc:approve` has no CLI path and refuses unattended sessions, and `sdlc gates` catches a wrong hash, but an agent that computes the right hash and fills in a name still passes. Accepted for solo use. On a team, the real approval is the PR review |
 | A change that edits only `.sdlc/config.json` passes `sdlc gates`, so loosened rules apply from the next change on | The gate judges each change by the base's rules, which stops a change loosening its own. Review the file in every PR that touches it. Blocking it outright would also stop people changing it |
-| CI logs can contain text from anyone who opened a PR, and the diagnoser reads them | It's read-only, its instructions treat logs as untrusted, and an eval plants an instruction in a log. In 8 runs it ignored the instruction 7 times, and the eighth is unexplained. The intent gate refuses any advance regardless |
+| CI logs can contain text from anyone who opened a PR, and the diagnoser reads them | It's read-only, its instructions treat logs as untrusted, and an eval plants an instruction in a log. In 14 runs it ignored the instruction 12 times. The other two ran `sdlc advance`, cause unexplained. The intent gate refuses any advance regardless |
 | A PR that edits `sdlc-gates.yml` hasn't been tested live, and neither has deleting `.sdlc/` | `pull_request_target` takes the workflow from the base branch, and the deletion check passes on a fresh clone. Run both attacks on the first repo that uses the factory with this check required |
 | Hook latency in every session | Immediate exit without `.sdlc/`; hooks kept fast and measured |
 | Infinite block loops at `SubagentStop` | Retry budget, then escalate |
 | Claude Code's plugin surface changes quickly (`experimental.evals`, `experimental.monitors`) | Pin a minimum version; keep logic in the CLI, not in platform features |
 | Agent teams are experimental, and role lookup reads their runtime config | Keep the skills working with plain subagents; pin the config format with a test |
-| Two teammates editing one file overwrite each other | `plan.md` assigns non-overlapping file sets, and the scope check enforces them |
+| Two teammates editing one file overwrite each other | The spec assigns non-overlapping file sets, and the scope check enforces them |
 | Node isn't guaranteed on every machine | Declare it as a prerequisite and have `/sdlc:init` check for it |
 | With 0 required approvals, an agent with merge rights could merge its own PR | Keep merge rights away from agents; raise the count when a second reviewer joins |
 
@@ -365,6 +370,7 @@ Settled on 2026-10-30:
 6. **Branch protection:** this repo is public, because the `shortlst-ai` account can't use branch protection on private repos. `main` requires a PR for everyone, including admins, and blocks force-pushes and deletion. Required approvals are 0, because GitHub doesn't let an author approve their own PR. A second reviewer can raise this later.
 7. **Execution model:** Claude Code's native worktrees, not hand-managed `git worktree`, with one session and agent team per work item.
 8. **Worktree environments:** each worktree builds its own through `commands.setup`, because a shared `.venv` tests the wrong code.
+9. **One path (2026-11-01):** every change goes from intent to spec to slices, with separate approvals for intent and spec. Tracks were dropped after real use. Section 5 has the reasons.
 
 ### What a local dogfood repo changes
 

@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { execFileSync, spawn, spawnSync } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -44,11 +45,21 @@ function repo(t, { identity = true } = {}) {
   }
   assert.equal(sdlc(['init'], dir).status, 0);
   assert.equal(sdlc(['new', 'feature'], dir).status, 0);
+  passIntent(dir);
   return dir;
 }
 
 function itemPath(cwd, ...parts) {
   return path.join(cwd, '.sdlc', 'work', ID, ...parts);
+}
+
+// Most of these run at the spec gate, so the intent gate is already behind them.
+function passIntent(cwd) {
+  const sha256 = crypto.createHash('sha256').update('the intent').digest('hex');
+  fs.mkdirSync(itemPath(cwd, 'approvals'), { recursive: true });
+  fs.writeFileSync(itemPath(cwd, 'intent.md'), 'the intent');
+  fs.writeFileSync(itemPath(cwd, 'approvals', 'intent.json'), JSON.stringify({ sha256 }));
+  assert.equal(sdlc(['advance'], cwd).status, 0);
 }
 
 function writeSpec(cwd, content = 'the spec') {
@@ -77,7 +88,7 @@ test('records the stage, hash, and approver, and opens the gate', (t) => {
   assert.deepEqual(record.approver, { name: 'Ada Reviewer', email: 'ada@example.com' });
 
   assert.equal(sdlc(['advance'], cwd).status, 0);
-  assert.equal(readItem(cwd).stage, 'plan');
+  assert.equal(readItem(cwd).stage, 'build');
 });
 
 test('editing an approved artifact reopens its gate until it is approved again', (t) => {
@@ -91,7 +102,7 @@ test('editing an approved artifact reopens its gate until it is approved again',
   assert.equal(sdlc(['advance'], cwd).status, 1);
 
   assert.equal(hook(cwd).decision, undefined);
-  assert.equal(nextAction(cwd).action, 'produce');
+  assert.equal(nextAction(cwd).action, 'advance');
   const approvals = readItem(cwd).history.filter((event) => event.approved);
   assert.equal(approvals.length, 2);
   assert.notEqual(approvals[0].sha256, approvals[1].sha256);
@@ -102,7 +113,7 @@ test('refuses when nothing is waiting on approval', (t) => {
   const output = hook(cwd);
   assert.equal(output.decision, 'block');
   assert.match(output.reason, /Not recorded: .*write spec.md/);
-  assert.equal(fs.existsSync(itemPath(cwd, 'approvals')), false);
+  assert.equal(fs.existsSync(itemPath(cwd, 'approvals', 'spec.json')), false);
 });
 
 test('refuses in an unattended session, so an agent can\'t use claude -p', (t) => {
@@ -111,7 +122,7 @@ test('refuses in an unattended session, so an agent can\'t use claude -p', (t) =
   const output = hook(cwd, { extraEnv: { CLAUDE_CODE_SESSION_ATTENDED: '0' } });
   assert.equal(output.decision, 'block');
   assert.match(output.reason, /unattended/);
-  assert.equal(fs.existsSync(itemPath(cwd, 'approvals')), false);
+  assert.equal(fs.existsSync(itemPath(cwd, 'approvals', 'spec.json')), false);
 });
 
 test('an attended flag of 1 or a missing flag both work', (t) => {
@@ -131,7 +142,7 @@ test('refuses without a git identity, because an approval must name a person', (
   const output = hook(cwd);
   assert.equal(output.decision, 'block');
   assert.match(output.reason, /user\.name/);
-  assert.equal(fs.existsSync(itemPath(cwd, 'approvals')), false);
+  assert.equal(fs.existsSync(itemPath(cwd, 'approvals', 'spec.json')), false);
 });
 
 test('refuses outside the factory', (t) => {
@@ -153,7 +164,7 @@ test('the CLI has no way to approve', (t) => {
   const cwd = repo(t);
   writeSpec(cwd);
   assert.equal(sdlc(['approve'], cwd).status, 2);
-  assert.equal(fs.existsSync(itemPath(cwd, 'approvals')), false);
+  assert.equal(fs.existsSync(itemPath(cwd, 'approvals', 'spec.json')), false);
 });
 
 for (const name of ['approve', 'abandon']) {
@@ -229,7 +240,7 @@ function linkedWorktree(root, name) {
   git(root, 'commit', '-q', '-m', 'factory');
   git(root, 'worktree', 'add', '-q', '-b', `worktree-${name}`, dir);
   assert.equal(sdlc(['new', name], dir).status, 0);
-  fs.writeFileSync(path.join(dir, '.sdlc', 'work', `0002-${name}`, 'spec.md'), 'the spec');
+  fs.writeFileSync(path.join(dir, '.sdlc', 'work', `0002-${name}`, 'intent.md'), 'the intent');
   return dir;
 }
 
@@ -239,8 +250,8 @@ test('a person can approve an item in another worktree by its name', (t) => {
   const dir = linkedWorktree(root, 'labels');
 
   const context = hook(root, { args: 'labels' }).hookSpecificOutput.additionalContext;
-  assert.match(context, /Approval recorded: 0002-labels spec/);
-  assert.ok(fs.existsSync(path.join(dir, '.sdlc', 'work', '0002-labels', 'approvals', 'spec.json')));
+  assert.match(context, /Approval recorded: 0002-labels intent/);
+  assert.ok(fs.existsSync(path.join(dir, '.sdlc', 'work', '0002-labels', 'approvals', 'intent.json')));
   assert.equal(sdlc(['status'], dir).stdout.includes('must type /sdlc:approve'), false);
 });
 
@@ -251,7 +262,7 @@ test('with no name and nothing here, approve lists what is waiting and records n
 
   const result = hook(root);
   assert.equal(result.decision, 'block');
-  assert.match(result.reason, /waiting on you: 0002-labels \(spec\)/);
+  assert.match(result.reason, /waiting on you: 0002-labels \(intent\)/);
   assert.equal(fs.existsSync(path.join(dir, '.sdlc', 'work', '0002-labels', 'approvals')), false);
 });
 
@@ -259,7 +270,7 @@ test('an item that isn\'t at a gate is left off the waiting list', (t) => {
   const root = repo(t);
   hook(root, { args: `${ID} replaced by the worktree`, command: 'abandon' });
   const dir = linkedWorktree(root, 'labels');
-  fs.rmSync(path.join(dir, '.sdlc', 'work', '0002-labels', 'spec.md'));
+  fs.rmSync(path.join(dir, '.sdlc', 'work', '0002-labels', 'intent.md'));
 
   const result = hook(root);
   assert.equal(result.decision, 'block');
@@ -289,7 +300,7 @@ test('worktrees with no factory, or gone from disk, don\'t get in the way', (t) 
   fs.rmSync(gone, { recursive: true });
 
   assert.match(hook(root, { args: 'labels' }).hookSpecificOutput.additionalContext, /Approval recorded/);
-  assert.ok(fs.existsSync(path.join(dir, '.sdlc', 'work', '0002-labels', 'approvals', 'spec.json')));
+  assert.ok(fs.existsSync(path.join(dir, '.sdlc', 'work', '0002-labels', 'approvals', 'intent.json')));
 });
 
 test('a number shared by two worktrees is refused rather than guessed', (t) => {
@@ -391,7 +402,7 @@ test('the wait never records an approval by itself', async (t) => {
   await waitFor(() => markers(cwd).length === 1);
   child.kill();
   await done;
-  assert.equal(fs.existsSync(itemPath(cwd, 'approvals')), false);
+  assert.equal(fs.existsSync(itemPath(cwd, 'approvals', 'spec.json')), false);
 });
 
 test('approve all records everything waiting and lists it', (t) => {
@@ -401,12 +412,12 @@ test('approve all records everything waiting and lists it', (t) => {
   const second = path.join(root, '.claude', 'worktrees', 'other');
   git(root, 'worktree', 'add', '-q', '-b', 'worktree-other', second);
   assert.equal(sdlc(['new', 'other'], second).status, 0);
-  fs.writeFileSync(path.join(second, '.sdlc', 'work', '0002-other', 'spec.md'), 'the spec');
+  fs.writeFileSync(path.join(second, '.sdlc', 'work', '0002-other', 'intent.md'), 'the intent');
 
   const context = hook(root, { args: 'all' }).hookSpecificOutput.additionalContext;
   assert.deepEqual(context.split('\n').map((line) => line.split(' ')[2]), ['0002-labels', '0002-other']);
   for (const [dir, id] of [[first, '0002-labels'], [second, '0002-other']]) {
-    assert.ok(fs.existsSync(path.join(dir, '.sdlc', 'work', id, 'approvals', 'spec.json')));
+    assert.ok(fs.existsSync(path.join(dir, '.sdlc', 'work', id, 'approvals', 'intent.json')));
   }
 });
 
@@ -421,7 +432,7 @@ test('approve all leaves items that aren\'t at a gate alone', (t) => {
   const context = hook(root, { args: 'all' }).hookSpecificOutput.additionalContext;
   assert.equal(context.split('\n').length, 1);
   assert.equal(fs.existsSync(path.join(second, '.sdlc', 'work', '0002-other', 'approvals')), false);
-  assert.ok(fs.existsSync(path.join(first, '.sdlc', 'work', '0002-labels', 'approvals', 'spec.json')));
+  assert.ok(fs.existsSync(path.join(first, '.sdlc', 'work', '0002-labels', 'approvals', 'intent.json')));
 });
 
 test('approve all with nothing waiting says so and records nothing', (t) => {
@@ -437,7 +448,7 @@ test('an unattended session can\'t approve all', (t) => {
   writeSpec(root);
   const result = hook(root, { args: 'all', extraEnv: { CLAUDE_CODE_SESSION_ATTENDED: '0' } });
   assert.equal(result.decision, 'block');
-  assert.equal(fs.existsSync(itemPath(root, 'approvals')), false);
+  assert.equal(fs.existsSync(itemPath(root, 'approvals', 'spec.json')), false);
 });
 
 test('an unattended session doesn\'t wait at a gate', async (t) => {

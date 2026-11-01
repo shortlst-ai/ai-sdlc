@@ -8,7 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { describe, test } = require('node:test');
 
-const { outOfScope, parseScope } = require('../plugins/sdlc/lib/check');
+const { outOfScope, parseScope, parseSlices } = require('../plugins/sdlc/lib/check');
 
 const PLUGIN = path.join(__dirname, '..', 'plugins', 'sdlc');
 const CLI = path.join(PLUGIN, 'bin', 'sdlc');
@@ -61,17 +61,25 @@ function state(cwd) {
   return JSON.parse(fs.readFileSync(itemFile(cwd, 'state.json'), 'utf8'));
 }
 
-const PLAN = '# Plan\n\n```scope name=api\nsrc/api/**\n```\n';
+const SPEC = '# Spec\n\n### S1: The API\n\n```scope name=api\nsrc/api/**\n```\n';
 
-// A standard item at build, with a plan that allows src/api/.
-function atBuild(t, verify, plan = PLAN) {
+function approve(cwd, stage, artifact, content) {
+  touch(cwd, `.sdlc/work/${ID}/${artifact}`, content);
+  const sha256 = crypto.createHash('sha256').update(content).digest('hex');
+  touch(cwd, `.sdlc/work/${ID}/approvals/${stage}.json`, JSON.stringify({ sha256 }));
+}
+
+function passReview(cwd, slice = 'S1', report = 'Verdict: pass\n') {
+  touch(cwd, `.sdlc/work/${ID}/evidence/reviews/${slice}.md`, report);
+}
+
+// An item at build, with an approved spec that allows src/api/.
+function atBuild(t, verify, spec = SPEC) {
   const cwd = repo(t, verify);
   assert.equal(sdlc(cwd, 'new', 'feature').status, 0);
-  touch(cwd, `.sdlc/work/${ID}/spec.md`, 'spec');
-  touch(cwd, `.sdlc/work/${ID}/plan.md`, plan);
-  const sha256 = crypto.createHash('sha256').update('spec').digest('hex');
-  touch(cwd, `.sdlc/work/${ID}/approvals/spec.json`, JSON.stringify({ sha256 }));
+  approve(cwd, 'intent', 'intent.md', 'intent');
   assert.equal(sdlc(cwd, 'advance').status, 0);
+  approve(cwd, 'spec', 'spec.md', spec);
   assert.equal(sdlc(cwd, 'advance').status, 0);
   return cwd;
 }
@@ -97,7 +105,7 @@ describe('parseScope', () => {
 });
 
 describe('outOfScope', () => {
-  test('lists what the plan didn\'t allow', () => {
+  test('lists what the spec didn\'t allow', () => {
     assert.deepEqual(outOfScope(['src/a.py', 'src/b.py'], ['src/a.py'], []), ['src/b.py']);
   });
 
@@ -107,26 +115,27 @@ describe('outOfScope', () => {
 });
 
 describe('the scope check', () => {
-  test('passes when changes match the plan', (t) => {
+  test('passes when changes match the spec', (t) => {
     const cwd = atBuild(t);
     touch(cwd, 'src/api/a.py');
     assert.equal(sdlc(cwd, 'check').status, 0);
+    passReview(cwd);
     assert.equal(sdlc(cwd, 'advance').status, 0);
   });
 
-  test('catches uncommitted, untracked work outside the plan', (t) => {
+  test('catches uncommitted, untracked work outside the spec', (t) => {
     const cwd = atBuild(t);
     touch(cwd, 'src/other/a.py');
     const result = sdlc(cwd, 'check');
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /outside the plan's scope: src\/other\/a\.py/);
+    assert.match(result.stderr, /outside the spec's scope: src\/other\/a\.py/);
   });
 
   test('catches work that was committed', (t) => {
     const cwd = atBuild(t);
     touch(cwd, 'src/other/a.py');
     commitAll(cwd);
-    assert.match(sdlc(cwd, 'check').stderr, /outside the plan's scope: src\/other\/a\.py/);
+    assert.match(sdlc(cwd, 'check').stderr, /outside the spec's scope: src\/other\/a\.py/);
   });
 
   test('catches a deleted file', (t) => {
@@ -135,13 +144,13 @@ describe('the scope check', () => {
     commitAll(cwd);
     sdlc(cwd, 'new', 'feature');
     touch(cwd, `.sdlc/work/${ID}/spec.md`, 'spec');
-    touch(cwd, `.sdlc/work/${ID}/plan.md`, PLAN);
+    touch(cwd, `.sdlc/work/${ID}/spec.md`, SPEC);
     const sha256 = crypto.createHash('sha256').update('spec').digest('hex');
     touch(cwd, `.sdlc/work/${ID}/approvals/spec.json`, JSON.stringify({ sha256 }));
     sdlc(cwd, 'advance');
     sdlc(cwd, 'advance');
     fs.rmSync(path.join(cwd, 'src/other/a.py'));
-    assert.match(sdlc(cwd, 'check').stderr, /outside the plan's scope/);
+    assert.match(sdlc(cwd, 'check').stderr, /outside the spec's scope/);
   });
 
   test('a build can\'t advance outside its scope', (t) => {
@@ -152,8 +161,8 @@ describe('the scope check', () => {
     assert.equal(state(cwd).stage, 'build');
   });
 
-  test('a plan with no scope block can\'t leave build', (t) => {
-    const cwd = atBuild(t, 'true', '# Plan with no scope');
+  test('a spec with no scope block can\'t leave build', (t) => {
+    const cwd = atBuild(t, 'true', '# Spec with no scope');
     assert.match(sdlc(cwd, 'advance').stderr, /no ```scope block/);
   });
 
@@ -166,76 +175,95 @@ describe('the scope check', () => {
 
 describe('reclassifying from the real diff', () => {
   test('files that touch a critical path raise the track', (t) => {
-    const cwd = repo(t);
-    sdlc(cwd, 'new', 'feature', '--files', 'src/a.py');
-    assert.equal(state(cwd).track, 'quick');
-    touch(cwd, `.sdlc/work/${ID}/evidence/reproduce.md`);
-    sdlc(cwd, 'advance');
-    touch(cwd, 'src/a.py');
+    const cwd = atBuild(t, 'true', '```scope\nsrc/**\n```\n');
     touch(cwd, 'src/auth/login.py');
-    const config = path.join(cwd, '.sdlc', 'config.json');
-    assert.equal(fs.existsSync(config), true);
-    const scoped = JSON.parse(fs.readFileSync(itemFile(cwd, 'state.json'), 'utf8'));
-    scoped.files = ['src/**'];
-    fs.writeFileSync(itemFile(cwd, 'state.json'), JSON.stringify(scoped));
-    touch(cwd, `.sdlc/work/${ID}/plan.md`, '```scope\nsrc/**\n```\n');
+    passReview(cwd);
     const result = sdlc(cwd, 'advance');
     assert.match(result.stdout, /track was raised/);
     assert.equal(state(cwd).track, 'critical');
-    assert.equal(state(cwd).stage, 'build');
+    assert.equal(state(cwd).stage, 'verify');
   });
 
-  test('an empty diff doesn\'t raise a quick item', (t) => {
-    const cwd = repo(t);
-    sdlc(cwd, 'new', 'feature', '--files', 'src/a.py');
-    touch(cwd, `.sdlc/work/${ID}/evidence/reproduce.md`);
-    sdlc(cwd, 'advance');
-    assert.equal(sdlc(cwd, 'advance').status, 0);
-    assert.equal(state(cwd).track, 'quick');
-  });
-
-  test('a small change never lowers a standard item', (t) => {
+  test('an ordinary change stays on the ordinary path', (t) => {
     const cwd = atBuild(t);
     touch(cwd, 'src/api/a.py');
-    sdlc(cwd, 'advance');
+    passReview(cwd);
+    assert.equal(sdlc(cwd, 'advance').status, 0);
     assert.equal(state(cwd).track, 'standard');
   });
 });
 
-describe('the quick track\'s test lock', () => {
-  function quick(t) {
-    const cwd = repo(t);
-    sdlc(cwd, 'new', 'feature', '--files', 'src/a.py');
-    touch(cwd, 'tests/test_a.py', 'failing test\n');
-    touch(cwd, `.sdlc/work/${ID}/evidence/reproduce.md`);
-    commitAll(cwd, 'the failing test');
+describe('slices', () => {
+  const TWO = '### S1: First\n\n```scope\nsrc/api/**\n```\n\n### S2: Second\n\n```scope\nsrc/web/**\n```\n';
+
+  test('reads the slices from the spec', () => {
+    assert.deepEqual(parseSlices(TWO), ['S1', 'S2']);
+  });
+
+  test('a heading level doesn\'t matter, and a repeat counts once', () => {
+    assert.deepEqual(parseSlices('## S1: a\n#### S2 b\n### S1: again\n'), ['S1', 'S2']);
+  });
+
+  test('a spec with no slice headings is one slice', () => {
+    assert.deepEqual(parseSlices('```scope\nsrc/**\n```\n'), ['S1']);
+    assert.deepEqual(parseSlices(null), ['S1']);
+  });
+
+  test('a mention of a slice in the text isn\'t a slice', () => {
+    assert.deepEqual(parseSlices('### S1: a\n\nThis depends on S2 later.\n'), ['S1']);
+  });
+
+  test('a build can\'t finish until every slice has passed review', (t) => {
+    const cwd = atBuild(t, 'true', TWO);
+    touch(cwd, 'src/api/a.py');
+    assert.match(sdlc(cwd, 'advance').stderr, /slice S1 has no review; slice S2 has no review/);
+
+    passReview(cwd, 'S1');
+    assert.match(sdlc(cwd, 'advance').stderr, /slice S2 has no review/);
+
+    passReview(cwd, 'S2', 'Verdict: rework\n');
+    assert.match(sdlc(cwd, 'advance').stderr, /slice S2 didn't pass its review/);
+    assert.equal(state(cwd).stage, 'build');
+
+    passReview(cwd, 'S2');
     assert.equal(sdlc(cwd, 'advance').status, 0);
-    return cwd;
-  }
-
-  test('the fix passes when the test is untouched', (t) => {
-    const cwd = quick(t);
-    touch(cwd, 'src/a.py');
-    assert.equal(sdlc(cwd, 'check').status, 0);
+    assert.equal(state(cwd).stage, 'verify');
   });
 
-  test('editing the test during the fix is caught', (t) => {
-    const cwd = quick(t);
-    touch(cwd, 'tests/test_a.py', 'weakened test\n');
-    assert.match(sdlc(cwd, 'check').stderr, /tests changed during the fix: tests\/test_a\.py/);
+  test('sending a change back throws away its slice reviews', (t) => {
+    const cwd = atBuild(t);
+    touch(cwd, 'src/api/a.py');
+    passReview(cwd);
+    assert.equal(sdlc(cwd, 'advance').status, 0);
+    assert.equal(sdlc(cwd, 'rework', '--reason', 'tests fail').status, 0);
+    assert.equal(fs.existsSync(itemFile(cwd, 'evidence', 'reviews', 'S1.md')), false);
+    assert.match(sdlc(cwd, 'advance').stderr, /slice S1 has no review/);
   });
 
-  test('committing the edit doesn\'t hide it', (t) => {
-    const cwd = quick(t);
-    touch(cwd, 'tests/test_a.py', 'weakened test\n');
+  test('a large change gets a warning, not a refusal', (t) => {
+    const cwd = atBuild(t);
+    touch(cwd, 'src/api/a.py', 'line\n'.repeat(700));
     commitAll(cwd);
-    assert.match(sdlc(cwd, 'check').stderr, /tests changed during the fix/);
+    const result = sdlc(cwd, 'check');
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Warning: 700 changed lines/);
   });
 
-  test('declared files are the scope', (t) => {
-    const cwd = quick(t);
-    touch(cwd, 'src/b.py');
-    assert.match(sdlc(cwd, 'check').stderr, /outside the plan's scope: src\/b\.py/);
+  test('a small change gets no warning', (t) => {
+    const cwd = atBuild(t);
+    touch(cwd, 'src/api/a.py');
+    commitAll(cwd);
+    assert.doesNotMatch(sdlc(cwd, 'check').stdout, /Warning/);
+  });
+
+  test('an amended spec reopens its gate, even in the middle of a build', (t) => {
+    const cwd = atBuild(t);
+    touch(cwd, `.sdlc/work/${ID}/spec.md`, `${SPEC}\nOne more thing.\n`);
+    const [item] = JSON.parse(sdlc(cwd, 'status', '--json').stdout).items;
+    assert.deepEqual(item.next, { action: 'approve', stage: 'spec', artifact: 'spec.md', stale: true });
+    touch(cwd, 'src/api/a.py');
+    passReview(cwd);
+    assert.match(sdlc(cwd, 'advance').stderr, /a person must type \/sdlc:approve again/);
   });
 });
 
@@ -243,7 +271,9 @@ describe('sdlc verify', () => {
   function atVerify(t, command) {
     const cwd = atBuild(t, command);
     touch(cwd, 'src/api/a.py');
+    passReview(cwd);
     assert.equal(sdlc(cwd, 'advance').status, 0);
+    commitAll(cwd);
     return cwd;
   }
 
@@ -283,11 +313,35 @@ describe('sdlc verify', () => {
     assert.match(result.stderr, /write evidence\/verify\.md/);
   });
 
-  test('committing the code doesn\'t invalidate evidence', (t) => {
-    const cwd = atVerify(t, 'true');
-    sdlc(cwd, 'verify');
+  test('committing the same code doesn\'t invalidate evidence', (t) => {
+    const cwd = atVerify(t);
+    touch(cwd, 'src/api/a.py', 'edited\n');
+    assert.equal(sdlc(cwd, 'verify').status, 0);
     commitAll(cwd);
     assert.equal(sdlc(cwd, 'advance').status, 0);
+  });
+
+  test('files a test run leaves behind don\'t make good evidence look stale', (t) => {
+    const cwd = atVerify(t);
+    assert.equal(sdlc(cwd, 'verify').status, 0);
+    touch(cwd, 'src/api/__pycache__/a.pyc', 'bytecode\n');
+    assert.equal(sdlc(cwd, 'advance').status, 0);
+    assert.equal(state(cwd).stage, 'review');
+  });
+
+  test('a code change after verify still counts, once it\'s in Git', (t) => {
+    const cwd = atVerify(t);
+    assert.equal(sdlc(cwd, 'verify').status, 0);
+    touch(cwd, 'src/api/a.py', 'sneaky change\n');
+    assert.match(sdlc(cwd, 'advance').stderr, /write evidence\/verify\.md/);
+  });
+
+  test('an untracked file can\'t reach the base branch without invalidating evidence', (t) => {
+    const cwd = atVerify(t);
+    assert.equal(sdlc(cwd, 'verify').status, 0);
+    touch(cwd, 'src/api/new.py', 'never tested\n');
+    commitAll(cwd);
+    assert.match(sdlc(cwd, 'advance').stderr, /write evidence\/verify\.md/);
   });
 
   test('a hand-written verify.md doesn\'t count', (t) => {
@@ -325,7 +379,7 @@ describe('the builder stop hook', () => {
     touch(cwd, 'src/other/a.py');
     const output = JSON.parse(stop(cwd).stdout);
     assert.equal(output.decision, 'block');
-    assert.match(output.reason, /outside the plan's scope: src\/other\/a\.py/);
+    assert.match(output.reason, /outside the spec's scope: src\/other\/a\.py/);
   });
 
   test('sends a failing build back with the output', (t) => {

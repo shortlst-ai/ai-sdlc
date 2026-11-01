@@ -29,7 +29,7 @@ describe('agents', () => {
   const names = fs.readdirSync(path.join(PLUGIN, 'agents')).map((file) => file.replace('.md', ''));
 
   test('the roles the hooks know about exist', () => {
-    for (const role of ['researcher', 'spec-writer', 'planner', 'builder', 'verifier', 'reviewer']) {
+    for (const role of ['researcher', 'spec-writer', 'builder', 'verifier', 'reviewer', 'diagnoser']) {
       assert.ok(names.includes(role), role);
     }
   });
@@ -51,7 +51,7 @@ describe('agents', () => {
   });
 
   test('writers without Bash can\'t reach around the path rules', () => {
-    for (const name of ['spec-writer', 'planner']) assert.ok(!agent(name).tools.includes('Bash'), name);
+    assert.ok(!agent('spec-writer').tools.includes('Bash'));
   });
 
   test('no agent relies on frontmatter a plugin or teammate ignores', () => {
@@ -138,7 +138,6 @@ describe('sdlc init options', () => {
     const written = config(cwd);
     assert.deepEqual(written.commands, { setup: 'make env', verify: 'make test', format: 'fmt {file}' });
     assert.deepEqual(written.tracks.critical.paths, ['a/**', 'b/**']);
-    assert.equal(written.tracks.quick.max_files, 3);
     assert.deepEqual(written.protected, ['gen/**']);
   });
 

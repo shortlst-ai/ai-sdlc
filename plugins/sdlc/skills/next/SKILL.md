@@ -10,7 +10,7 @@ Run `sdlc status --json` and act on `next`:
 | --- | --- |
 | `new` | Ask what to work on, then use `/sdlc:new` |
 | `choose` | Ask which item, using the ids listed |
-| `produce` | Use the stage's skill, in the table below |
+| `produce` | Use the stage's skill, in the table below. If `next.stage` is `verify` but the item is already past it, the code changed after it was tested, so run `sdlc rework --reason "<what changed>"` |
 | `approve` | Stop. Show `next.artifact`, including any concerns it flags, and ask the person to type `/sdlc:approve <name of this item>`, here or in any other session on this repo. This session carries on by itself once they have. If `next.stale` is set, say the file changed after approval. You can't approve anything |
 | `advance` | Run `sdlc advance`, except at `build` as noted below, then run this skill again |
 | `none` | Commit `.sdlc/` and show the review's findings. With a remote, push and open a pull request naming the item, and never merge it yourself. With no remote, see below |
@@ -18,8 +18,6 @@ Run `sdlc status --json` and act on `next`:
 | Stage | Skill |
 | --- | --- |
 | `intent`, `spec` | `/sdlc:spec` |
-| `plan` | `/sdlc:plan` |
-| `reproduce` | `/sdlc:reproduce` |
 | `verify` | `/sdlc:verify` |
 | `review` | `/sdlc:review` |
 | `merge` | `/sdlc:ship` |

@@ -40,11 +40,19 @@ base_repo() {
   commit 'Adopt the factory'
 }
 
+on_a_worktree_branch() {
+  base_repo
+  git switch -q -c worktree-feature
+}
+
 at_spec_gate() {
   base_repo
   git switch -q -c worktree-feature
   sdlc new feature >/dev/null
-  printf '# Spec\n\ncalc.py gains subtract(a, b).\n' >"$ITEM/spec.md"
+  printf '# Intent\n\nPeople need to subtract numbers.\n' >"$ITEM/intent.md"
+  approval intent intent.md
+  sdlc advance >/dev/null
+  printf '# Spec\n\ncalc.py gains subtract(a, b).\n\n### S1: Add subtract\n\n```scope\ncalc.py\n```\n' >"$ITEM/spec.md"
   commit 'Write the spec'
 }
 
@@ -52,11 +60,11 @@ at_spec_gate() {
 at_merge() {
   at_spec_gate
   approval spec spec.md
-  printf '# Plan\n\n```scope\ncalc.py\n```\n' >"$ITEM/plan.md"
-  sdlc advance >/dev/null
   sdlc advance >/dev/null
   printf 'def subtract(a, b):\n    return a - b\n' >>calc.py
   commit 'Add subtract'
+  mkdir -p "$ITEM/evidence/reviews"
+  printf 'Verdict: pass\n' >"$ITEM/evidence/reviews/S1.md"
   sdlc advance >/dev/null
   sdlc verify >/dev/null
   sdlc advance >/dev/null

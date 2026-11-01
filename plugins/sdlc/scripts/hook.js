@@ -134,12 +134,28 @@ function sessionStart(root) {
   }
 }
 
+// A session sometimes ends its turn with work left and nobody needed. The CLI knows
+// that, so it decides rather than the model. It nudges once per stop, and stays out
+// of the way of running teammates, gates, and sessions nobody is watching. A missing
+// task list means it can't tell, so it does nothing.
+function stop(root, input) {
+  if (process.env.CLAUDE_CODE_SESSION_ATTENDED === '0' || input.stop_hook_active) return;
+  if (!Array.isArray(input.background_tasks) || input.background_tasks.length > 0) return;
+  const open = openItems(root);
+  if (open.length !== 1 || !['produce', 'advance'].includes(open[0].next.action)) return;
+  const reason =
+    `${open[0].item.id} still has work and doesn't need a person yet: ${open[0].describeNext}. ` +
+    'Continue with /sdlc:next. If you stopped to ask the person something, say so and stop.';
+  console.log(JSON.stringify({ decision: 'block', reason }));
+}
+
 const HANDLERS = {
   'pre-edit': preEdit,
   'pre-bash': preBash,
   'post-edit': postEdit,
   'subagent-stop': subagentStop,
   'session-start': sessionStart,
+  stop,
 };
 
 function main() {
