@@ -37,18 +37,23 @@ function factoryRoot(cwd) {
 }
 
 // What's waiting on a person across the repo, for someone with no item here.
-function waitingList(root) {
-  return workspace.openEverywhere(root).flatMap(({ root: dir, item }) => {
-    const next = machine.nextAction(item, workspace.readFacts(dir, item));
-    return next.action === 'approve' ? [`${item.id} (${next.stage})`] : [];
+function waitingItems(root) {
+  return workspace.openEverywhere(root).filter(({ root: dir, item }) => {
+    return machine.nextAction(item, workspace.readFacts(dir, item)).action === 'approve';
   });
+}
+
+function describeWaiting({ root, item }) {
+  return `${item.id} (${machine.nextAction(item, workspace.readFacts(root, item)).stage})`;
 }
 
 function target(root, query) {
   if (query) return workspace.locateItem(root, query);
   const hasOwn = workspace.ownItems(root).some(machine.isOpen);
-  const waiting = hasOwn ? [] : waitingList(root);
-  if (waiting.length > 0) throw new SdlcError(`name one, waiting on you: ${waiting.join(', ')}`);
+  const waiting = hasOwn ? [] : waitingItems(root).map(describeWaiting);
+  if (waiting.length > 0) {
+    throw new SdlcError(`name one or use 'all', waiting on you: ${waiting.join(', ')}`);
+  }
   return { root, item: workspace.activeItem(root) };
 }
 
@@ -73,6 +78,14 @@ function approve({ cwd, query }) {
   return { id: item.id, ...record };
 }
 
+// Everything waiting across the repo, for a person who has seen the list.
+function approveAll({ cwd }) {
+  const root = factoryRoot(cwd);
+  const waiting = waitingItems(root);
+  if (waiting.length === 0) throw new SdlcError('nothing is waiting on you');
+  return waiting.map(({ root: dir, item }) => approve({ cwd: dir, query: item.id }));
+}
+
 // The item stays on disk with its reason, so abandoning leaves an audit trail.
 function abandon({ cwd, query, reason }) {
   if (!reason) throw new SdlcError('give a reason: /sdlc:abandon [id] <reason>');
@@ -84,4 +97,4 @@ function abandon({ cwd, query, reason }) {
   return { id: item.id, reason };
 }
 
-module.exports = { abandon, approve };
+module.exports = { abandon, approve, approveAll };

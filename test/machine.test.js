@@ -5,7 +5,7 @@ const { describe, test } = require('node:test');
 
 const machine = require('../plugins/sdlc/lib/machine');
 
-const { ARTIFACTS, DONE, FLOWS, TRACKS } = machine;
+const { ARTIFACTS, DONE, FLOWS, TRACKS, nextAction, reviewVerdict } = machine;
 
 const CONFIG = {
   tracks: { critical: { paths: ['src/auth/**', 'migrations/**', '*.lock'] }, quick: { max_files: 3 } },
@@ -52,6 +52,13 @@ describe('human gates by track', () => {
 
   test('standard has spec and merge gates', () => {
     assert.deepEqual(gates('standard'), ['spec', 'merge']);
+  });
+
+  test('only standard lets a clean review stand in for the merge gate', () => {
+    const merge = (track) => FLOWS[track].find((step) => step.stage === 'merge').gate;
+    assert.equal(merge('quick'), true);
+    assert.equal(merge('critical'), true);
+    assert.equal(merge('standard'), 'unless-review-passes');
   });
 
   test('critical has all five gates', () => {
@@ -239,4 +246,59 @@ describe('isValidItem', () => {
     assert.equal(machine.isValidItem(item('quick', 'build', { history: undefined })), false);
     assert.equal(machine.isValidItem(null), false);
   });
+});
+
+describe('review verdicts', () => {
+  const cases = [
+    ['**Verdict**: `pass`', 'pass'],
+    ['Verdict: pass', 'pass'],
+    ['verdict: pass', 'pass'],
+    ['**Verdict**: `rework`', 'rework'],
+    ['## Findings\n\nThe verdict is fine, but read on.\n\nVerdict: pass\n', 'pass'],
+    ['Verdict: pass\nVerdict: rework', null],
+    ['Verdict: pass\nverdict: pass', 'pass'],
+    ['No verdict here', null],
+    ['Verdict: passable', null],
+    ['Verdict: maybe', null],
+    ['', null],
+    [null, null],
+  ];
+  for (const [text, expected] of cases) {
+    test(`${JSON.stringify(text)} reads as ${expected}`, () => {
+      assert.equal(reviewVerdict(text), expected);
+    });
+  }
+});
+
+describe('the standard merge gate', () => {
+  const REVIEW = 'evidence/review.md';
+  const artifacts = Object.fromEntries(Object.values(ARTIFACTS).map((file) => [file, 'hash']));
+  const atMerge = (track) => ({ id: '0001-a', track, stage: 'merge', rework: 0, history: [] });
+  const facts = (verdict, approvals = {}) => ({
+    artifacts,
+    approvals: { spec: { sha256: 'hash' }, intent: { sha256: 'hash' }, plan: { sha256: 'hash' }, ...approvals },
+    verdict,
+  });
+
+  test('a clean review needs no second approval', () => {
+    assert.deepEqual(nextAction(atMerge('standard'), facts('pass')), { action: 'advance', to: DONE });
+  });
+
+  for (const verdict of ['rework', null, undefined]) {
+    test(`a ${verdict} verdict still needs a person`, () => {
+      const next = nextAction(atMerge('standard'), facts(verdict));
+      assert.deepEqual(next, { action: 'approve', stage: 'merge', artifact: REVIEW });
+    });
+  }
+
+  test('a person can still sign off a review that didn\'t pass', () => {
+    const approvals = { merge: { sha256: 'hash' } };
+    assert.equal(nextAction(atMerge('standard'), facts('rework', approvals)).action, 'advance');
+  });
+
+  for (const track of ['quick', 'critical']) {
+    test(`${track} needs a person even after a clean review`, () => {
+      assert.equal(nextAction(atMerge(track), facts('pass')).action, 'approve');
+    });
+  }
 });

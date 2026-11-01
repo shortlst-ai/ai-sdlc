@@ -6,7 +6,7 @@
 
 const fs = require('node:fs');
 
-const { abandon, approve } = require('../lib/approve');
+const { abandon, approve, approveAll } = require('../lib/approve');
 const { SdlcError } = require('../lib/workspace');
 
 function block(reason) {
@@ -23,12 +23,17 @@ function allow(context) {
 
 const ITEM_ID = /^\d+(-[a-z0-9-]+)?$/;
 
-function runApprove(input, args) {
-  const record = approve({ cwd: input.cwd, query: args[0] });
-  allow(
+function recorded(record) {
+  return (
     `Approval recorded: ${record.id} ${record.stage}, ${record.artifact} ` +
-      `(sha256 ${record.sha256.slice(0, 12)}), by ${record.approver.name}.`,
+    `(sha256 ${record.sha256.slice(0, 12)}), by ${record.approver.name}.`
   );
+}
+
+function runApprove(input, args) {
+  const records =
+    args[0] === 'all' ? approveAll({ cwd: input.cwd }) : [approve({ cwd: input.cwd, query: args[0] })];
+  allow(records.map(recorded).join('\n'));
 }
 
 function runAbandon(input, args) {

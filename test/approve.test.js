@@ -241,7 +241,7 @@ test('a person can approve an item in another worktree by its name', (t) => {
   const context = hook(root, { args: 'labels' }).hookSpecificOutput.additionalContext;
   assert.match(context, /Approval recorded: 0002-labels spec/);
   assert.ok(fs.existsSync(path.join(dir, '.sdlc', 'work', '0002-labels', 'approvals', 'spec.json')));
-  assert.equal(sdlc(['status'], dir).stdout.includes('a person must approve'), false);
+  assert.equal(sdlc(['status'], dir).stdout.includes('must type /sdlc:approve'), false);
 });
 
 test('with no name and nothing here, approve lists what is waiting and records nothing', (t) => {
@@ -392,4 +392,64 @@ test('the wait never records an approval by itself', async (t) => {
   child.kill();
   await done;
   assert.equal(fs.existsSync(itemPath(cwd, 'approvals')), false);
+});
+
+test('approve all records everything waiting and lists it', (t) => {
+  const root = repo(t);
+  hook(root, { args: `${ID} replaced by the worktrees`, command: 'abandon' });
+  const first = linkedWorktree(root, 'labels');
+  const second = path.join(root, '.claude', 'worktrees', 'other');
+  git(root, 'worktree', 'add', '-q', '-b', 'worktree-other', second);
+  assert.equal(sdlc(['new', 'other'], second).status, 0);
+  fs.writeFileSync(path.join(second, '.sdlc', 'work', '0002-other', 'spec.md'), 'the spec');
+
+  const context = hook(root, { args: 'all' }).hookSpecificOutput.additionalContext;
+  assert.deepEqual(context.split('\n').map((line) => line.split(' ')[2]), ['0002-labels', '0002-other']);
+  for (const [dir, id] of [[first, '0002-labels'], [second, '0002-other']]) {
+    assert.ok(fs.existsSync(path.join(dir, '.sdlc', 'work', id, 'approvals', 'spec.json')));
+  }
+});
+
+test('approve all leaves items that aren\'t at a gate alone', (t) => {
+  const root = repo(t);
+  hook(root, { args: `${ID} replaced by the worktrees`, command: 'abandon' });
+  const first = linkedWorktree(root, 'labels');
+  const second = path.join(root, '.claude', 'worktrees', 'other');
+  git(root, 'worktree', 'add', '-q', '-b', 'worktree-other', second);
+  assert.equal(sdlc(['new', 'other'], second).status, 0);
+
+  const context = hook(root, { args: 'all' }).hookSpecificOutput.additionalContext;
+  assert.equal(context.split('\n').length, 1);
+  assert.equal(fs.existsSync(path.join(second, '.sdlc', 'work', '0002-other', 'approvals')), false);
+  assert.ok(fs.existsSync(path.join(first, '.sdlc', 'work', '0002-labels', 'approvals', 'spec.json')));
+});
+
+test('approve all with nothing waiting says so and records nothing', (t) => {
+  const root = repo(t);
+  hook(root, { args: `${ID} replaced by the worktrees`, command: 'abandon' });
+  const result = hook(root, { args: 'all' });
+  assert.equal(result.decision, 'block');
+  assert.match(result.reason, /nothing is waiting/);
+});
+
+test('an unattended session can\'t approve all', (t) => {
+  const root = repo(t);
+  writeSpec(root);
+  const result = hook(root, { args: 'all', extraEnv: { CLAUDE_CODE_SESSION_ATTENDED: '0' } });
+  assert.equal(result.decision, 'block');
+  assert.equal(fs.existsSync(itemPath(root, 'approvals')), false);
+});
+
+test('an unattended session doesn\'t wait at a gate', async (t) => {
+  const cwd = repo(t);
+  writeSpec(cwd);
+  const child = spawn('node', [AWAIT], {
+    env: env({ SDLC_AWAIT_POLL_MS: '20', CLAUDE_CODE_SESSION_ATTENDED: '0' }),
+  });
+  child.stdin.end(JSON.stringify({ cwd }));
+  const code = await new Promise((resolve) => {
+    child.on('close', resolve);
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(markers(cwd), []);
 });

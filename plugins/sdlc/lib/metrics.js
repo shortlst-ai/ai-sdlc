@@ -7,7 +7,7 @@
 const { execFileSync } = require('node:child_process');
 
 const { matchesAny } = require('./machine');
-const { SdlcError, loadConfig } = require('./workspace');
+const { SdlcError, listIds, loadConfig, loadItem } = require('./workspace');
 
 const RECORD = '\0';
 const FIELD = '\x1f';
@@ -102,11 +102,29 @@ function summarize(commits, testGlobs) {
   };
 }
 
+// Git reads a bare date as that date at the current time of day, which drops most
+// of the day it names.
+function sinceArg(since) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(since) ? `${since}T00:00:00` : since;
+}
+
+// Human approvals per finished item, from the items' own history. Dates compare as
+// text, which works because both are ISO.
+function approvals(root, since) {
+  const finished = listIds(root)
+    .map((id) => loadItem(root, id))
+    .filter((item) => item.stage === 'done')
+    .filter((item) => !since || (item.history.at(-1)?.at ?? '') >= since);
+  const total = finished.flatMap((item) => item.history).filter((event) => event.approved).length;
+  return { items: finished.length, total, per_item: share(total, finished.length) };
+}
+
 function collect(cwd, since) {
   const root = repoRoot(cwd);
   const args = ['log', '--no-merges', '--no-renames', '--numstat', '--format=%x00%aI%x1f%s'];
-  if (since) args.push(`--since=${since}`);
-  return summarize(parseLog(git(root, args)), loadConfig(root).tests);
+  if (since) args.push(`--since=${sinceArg(since)}`);
+  const summary = summarize(parseLog(git(root, args)), loadConfig(root).tests);
+  return { ...summary, approvals: approvals(root, since) };
 }
 
 module.exports = { collect, parseLog, summarize };

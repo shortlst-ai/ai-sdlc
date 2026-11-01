@@ -50,6 +50,9 @@ async function wait(root, id) {
 }
 
 async function main() {
+  // Nobody can approve in an unattended session, and waiting would keep `claude -p`
+  // running until the hook's timeout.
+  if (process.env.CLAUDE_CODE_SESSION_ATTENDED === '0') return 0;
   const input = JSON.parse(fs.readFileSync(0, 'utf8'));
   const root = workspace.findRoot(input.cwd);
   if (!root) return 0;

@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { ARTIFACTS, FLOWS, isOpen, isValidItem } = require('./machine');
+const { ARTIFACTS, FLOWS, isOpen, isValidItem, reviewVerdict } = require('./machine');
 
 const SDLC_DIR = '.sdlc';
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -243,6 +243,7 @@ function listIds(root) {
   return fs
     .readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
+    .filter((entry) => fs.existsSync(path.join(dir, entry.name, 'state.json')))
     .map((entry) => entry.name)
     .sort();
 }
@@ -282,6 +283,11 @@ function openEverywhere(root) {
       .filter(isOpen)
       .map((item) => ({ root: dir, item })),
   );
+}
+
+function openElsewhere(root) {
+  const here = fs.realpathSync(root);
+  return openEverywhere(root).filter((found) => fs.realpathSync(found.root) !== here);
 }
 
 function matchesQuery(id, query) {
@@ -425,7 +431,9 @@ function readFacts(root, item) {
     }
     approvals[stage] = readApproval(path.join(dir, 'approvals', `${stage}.json`));
   }
-  return { artifacts, approvals };
+  const review = path.join(dir, ARTIFACTS.review);
+  const verdict = fs.existsSync(review) ? reviewVerdict(fs.readFileSync(review, 'utf8')) : null;
+  return { artifacts, approvals, verdict };
 }
 
 // An unreadable approval counts as no approval, so the gate stays shut.
@@ -458,6 +466,7 @@ module.exports = {
   loadConfig,
   loadItem,
   locateItem,
+  openElsewhere,
   openEverywhere,
   readArtifact,
   readFacts,

@@ -13,7 +13,7 @@ Run `sdlc status --json` and act on `next`:
 | `produce` | Use the stage's skill, in the table below |
 | `approve` | Stop. Show `next.artifact`, including any concerns it flags, and ask the person to type `/sdlc:approve <name of this item>`, here or in any other session on this repo. This session carries on by itself once they have. If `next.stale` is set, say the file changed after approval. You can't approve anything |
 | `advance` | Run `sdlc advance`, except at `build` as noted below, then run this skill again |
-| `none` | Commit `.sdlc/`, push if there's a remote, and say the item is finished. With no remote, see below |
+| `none` | Commit `.sdlc/` and show the review's findings. With a remote, push and open a pull request naming the item, and never merge it yourself. With no remote, see below |
 
 | Stage | Skill |
 | --- | --- |
@@ -23,6 +23,7 @@ Run `sdlc status --json` and act on `next`:
 | `verify` | `/sdlc:verify` |
 | `review` | `/sdlc:review` |
 | `merge` | `/sdlc:ship` |
+| `release` | `/sdlc:release` |
 
 At `build`, `next.action` is always `advance`, because the stage has no file to wait for. Use `/sdlc:build` first, and advance only once the work is done.
 

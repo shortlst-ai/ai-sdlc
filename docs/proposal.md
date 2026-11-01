@@ -171,10 +171,12 @@ The track comes from `.sdlc/config.json` path rules, not from the model's judgme
 | Track | For | Stages | Human gates |
 | --- | --- | --- | --- |
 | `quick` | Small bug or tweak | Failing test, fix, verify, review | Merge only |
-| `standard` | Normal feature | Combined intent and spec, plan, build, verify, review | Spec, merge |
+| `standard` | Normal feature | Combined intent and spec, plan, build, verify, review | Spec, and merge only if the review didn't plainly pass |
 | `critical` | Auth, payments, migrations, regulated code | All stages, hidden scenarios, line-by-line human review | All five |
 
 The `quick` track borrows the playbook's rule for bug fixes: commit a failing test first, then lock test files during the fix.
+
+On `standard`, a person still merges the change, so a clean review doesn't need signing off twice. The merge gate applies only when the report's verdict is anything other than one plain `pass`. `sdlc gates` rechecks this. The first real runs took 1.67 approvals per item, and `sdlc metrics` tracks that number.
 
 ---
 
@@ -326,6 +328,7 @@ All of these come from Git, the PR history, and CI. `sdlc metrics` reports the G
 | Bash gates are incomplete, since command matching is best effort | Treat them as feedback only; CI is the control |
 | Local approvals can be forged by an agent with Bash, by writing the file directly or running `claude -p` | `/sdlc:approve` has no CLI path and refuses unattended sessions, and `sdlc gates` catches a wrong hash, but an agent that computes the right hash and fills in a name still passes. Accepted for solo use. On a team, the real approval is the PR review |
 | A change that edits only `.sdlc/config.json` passes `sdlc gates`, so loosened rules apply from the next change on | The gate judges each change by the base's rules, which stops a change loosening its own. Review the file in every PR that touches it. Blocking it outright would also stop people changing it |
+| A PR that edits `sdlc-gates.yml` hasn't been tested live, and neither has deleting `.sdlc/` | `pull_request_target` takes the workflow from the base branch, and the deletion check passes on a fresh clone. Run both attacks on the first repo that uses the factory with this check required |
 | Hook latency in every session | Immediate exit without `.sdlc/`; hooks kept fast and measured |
 | Infinite block loops at `SubagentStop` | Retry budget, then escalate |
 | Claude Code's plugin surface changes quickly (`experimental.evals`, `experimental.monitors`) | Pin a minimum version; keep logic in the CLI, not in platform features |

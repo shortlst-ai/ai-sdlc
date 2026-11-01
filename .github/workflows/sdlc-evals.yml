@@ -1,0 +1,30 @@
+# Checks that skills and agents still behave, which the unit tests can't see. Every
+# run is real model calls, so it only runs when the plugin changes, and it's skipped
+# on forks and until the ANTHROPIC_API_KEY secret exists.
+name: sdlc-evals
+on:
+  pull_request:
+    paths:
+      - plugins/sdlc/**
+      - package.json
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - if: ${{ env.ANTHROPIC_API_KEY == '' }}
+        run: echo "ANTHROPIC_API_KEY is not set, so the evals are skipped."
+      - if: ${{ env.ANTHROPIC_API_KEY != '' }}
+        run: npm install -g @anthropic-ai/claude-code
+      - if: ${{ env.ANTHROPIC_API_KEY != '' }}
+        run: npm run evals

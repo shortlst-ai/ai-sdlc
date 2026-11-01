@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node --test",
     "validate": "claude plugin validate --strict . && claude plugin validate --strict plugins/sdlc",
-    "check": "npm test && npm run validate"
+    "check": "npm test && npm run validate",
+    "evals": "cd plugins/sdlc && claude plugin eval . --trust-plugin --scaffold --ablation none --runs 3 --model sonnet --threshold 0.8 --no-publish --max-cost-usd 10 --allow-tools \"Bash(./.tools/sdlc *)\" \"Bash(.tools/sdlc *)\" \"Bash(git *)\" Write Edit"
   }
 }

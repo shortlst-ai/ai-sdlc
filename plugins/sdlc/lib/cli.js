@@ -107,10 +107,18 @@ function status(positionals, values) {
     console.log(JSON.stringify({ initialized: true, root, items, next }));
     return 0;
   }
-  console.log(`Factory initialized at ${root}`);
-  if (items.length === 0) console.log('No work items yet.');
+  console.log(`Factory root: ${root}`);
+  const elsewhere = positionals[0] ? [] : workspace.openElsewhere(root);
+  if (items.length === 0 && elsewhere.length === 0) {
+    console.log(workspace.listIds(root).length === 0 ? 'No work items yet.' : 'No open work items.');
+  }
   for (const item of items) {
     console.log(`${item.id}  ${item.track}  ${item.stage}  next: ${machine.describeNext(item.next)}`);
+  }
+  for (const { root: dir, item } of elsewhere) {
+    const next = machine.nextAction(item, workspace.readFacts(dir, item));
+    const where = path.relative(root, dir);
+    console.log(`${item.id}  ${item.track}  ${item.stage}  next: ${machine.describeNext(next)}  (in ${where})`);
   }
   return 0;
 }
@@ -266,7 +274,10 @@ function gates(positionals, values) {
   const result = runGates(process.cwd(), values.base);
   if (values.json) console.log(JSON.stringify(result));
   else if (!result.factory) console.log('This repo does not use the factory.');
-  else if (result.problems.length === 0) console.log(`Gates passed for ${result.items.length} work items.`);
+  else if (result.problems.length === 0) {
+    const count = result.items.length;
+    console.log(`Gates passed for ${count} work ${count === 1 ? 'item' : 'items'}.`);
+  }
   else for (const problem of result.problems) console.error(`sdlc: ${problem}`);
   return result.problems.length === 0 ? 0 : 1;
 }
@@ -277,11 +288,12 @@ function metrics(positionals, values) {
     console.log(JSON.stringify(summary));
     return 0;
   }
-  const { period, commits, size, signals } = summary;
+  const { period, commits, size, signals, approvals } = summary;
   console.log(`${commits.total} commits over ${period.span_days} days, ${period.active_days} active`);
   console.log(`Median change: ${size.median_files} files, ${size.median_lines} lines`);
   console.log(`Fix commits: ${signals.fix_commits}. Reverts: ${signals.reverts}.`);
   console.log(`Commits touching tests: ${signals.touching_tests}`);
+  console.log(`Approvals: ${approvals.total} across ${approvals.items} finished items, ${approvals.per_item} each`);
   return 0;
 }
 
