@@ -8,7 +8,7 @@ const machine = require('../plugins/sdlc/lib/machine');
 const { ARTIFACTS, DONE, FLOWS, TRACKS, nextAction, reviewVerdict } = machine;
 
 const CONFIG = {
-  tracks: { critical: { paths: ['src/auth/**', 'migrations/**', '*.lock'] }, quick: { max_files: 3 } },
+  tracks: { critical: { paths: ['src/auth/**', 'migrations/**', '*.lock'] } },
 };
 
 function item(track, stage, extra = {}) {
@@ -46,23 +46,28 @@ describe('the happy path', () => {
 describe('human gates by track', () => {
   const gates = (track) => FLOWS[track].filter((step) => step.gate).map((step) => step.stage);
 
-  test('quick has only the merge gate', () => {
-    assert.deepEqual(gates('quick'), ['merge']);
+  test('every change passes the intent and spec gates, and the merge gate if needed', () => {
+    assert.deepEqual(gates('standard'), ['intent', 'spec', 'merge']);
   });
 
-  test('standard has spec and merge gates', () => {
-    assert.deepEqual(gates('standard'), ['spec', 'merge']);
-  });
-
-  test('only standard lets a clean review stand in for the merge gate', () => {
+  test('a clean review stands in for the merge gate, except on critical paths', () => {
     const merge = (track) => FLOWS[track].find((step) => step.stage === 'merge').gate;
-    assert.equal(merge('quick'), true);
     assert.equal(merge('critical'), true);
     assert.equal(merge('standard'), 'unless-review-passes');
   });
 
+  test('there is one path, with critical adding sign-offs to it', () => {
+    const stages = (track) => FLOWS[track].map((step) => step.stage);
+    assert.deepEqual(stages('standard'), ['intent', 'spec', 'build', 'verify', 'review', 'merge']);
+    assert.deepEqual(stages('critical'), [...stages('standard'), 'release']);
+  });
+
+  test('items from before one path still read as valid', () => {
+    assert.equal(machine.isValidItem(item('quick', DONE)), true);
+  });
+
   test('critical has all five gates', () => {
-    assert.deepEqual(gates('critical'), ['intent', 'spec', 'plan', 'merge', 'release']);
+    assert.deepEqual(gates('critical'), ['intent', 'spec', 'merge', 'release']);
   });
 });
 
@@ -126,7 +131,7 @@ describe('rework', () => {
     });
   }
 
-  for (const stage of ['spec', 'plan', 'build', 'merge', DONE]) {
+  for (const stage of ['spec', 'build', 'merge', DONE]) {
     test(`refused from ${stage}`, () => {
       assert.equal(machine.rework(item('standard', stage), 3).ok, false);
     });
@@ -141,7 +146,7 @@ describe('rework', () => {
 
 describe('raising a track', () => {
   test('lowering is refused from every higher track', () => {
-    for (const [from, to] of [['standard', 'quick'], ['critical', 'quick'], ['critical', 'standard']]) {
+    for (const [from, to] of [['critical', 'standard']]) {
       assert.equal(machine.raiseTrack(item(from, 'build'), to).ok, false, `${from} to ${to}`);
     }
   });
@@ -154,13 +159,14 @@ describe('raising a track', () => {
 
   test('restarts when the new track lacks the stage', () => {
     const result = machine.raiseTrack(item('quick', 'reproduce'), 'standard');
-    assert.equal(result.item.stage, 'spec');
+    assert.equal(result.item.stage, 'intent');
   });
 
-  test('a raised item must backfill gates it skipped', () => {
-    const raised = machine.raiseTrack(item('quick', 'build'), 'critical').item;
-    const next = machine.nextAction(raised, completeFacts('quick'));
-    assert.deepEqual(next, { action: 'produce', stage: 'intent', artifact: 'intent.md' });
+  test('a raised item needs the sign-offs a clean review would have skipped', () => {
+    const raised = machine.raiseTrack(item('standard', 'merge'), 'critical').item;
+    const facts = { ...completeFacts('critical'), verdict: 'pass' };
+    delete facts.approvals.merge;
+    assert.equal(machine.nextAction(raised, facts).action, 'approve');
   });
 
   test('a done item can\'t be raised', () => {
@@ -173,11 +179,8 @@ describe('classify', () => {
     assert.equal(machine.classify([], CONFIG), 'standard');
   });
 
-  test('few files means quick', () => {
-    assert.equal(machine.classify(['a.py', 'b.py', 'c.py'], CONFIG), 'quick');
-  });
-
-  test('more files than the limit means standard', () => {
+  test('the size of a change doesn\'t matter', () => {
+    assert.equal(machine.classify(['a.py'], CONFIG), 'standard');
     assert.equal(machine.classify(['a', 'b', 'c', 'd'], CONFIG), 'standard');
   });
 
@@ -232,12 +235,12 @@ describe('abandoning', () => {
 
 describe('isValidItem', () => {
   test('accepts a real item', () => {
-    assert.equal(machine.isValidItem(item('standard', 'plan')), true);
+    assert.equal(machine.isValidItem(item('standard', 'spec')), true);
     assert.equal(machine.isValidItem(item('standard', DONE)), true);
   });
 
   test('rejects a stage outside the track', () => {
-    assert.equal(machine.isValidItem(item('quick', 'spec')), false);
+    assert.equal(machine.isValidItem(item('standard', 'plan')), false);
   });
 
   test('rejects an unknown track or a bad count', () => {
@@ -276,7 +279,7 @@ describe('the standard merge gate', () => {
   const atMerge = (track) => ({ id: '0001-a', track, stage: 'merge', rework: 0, history: [] });
   const facts = (verdict, approvals = {}) => ({
     artifacts,
-    approvals: { spec: { sha256: 'hash' }, intent: { sha256: 'hash' }, plan: { sha256: 'hash' }, ...approvals },
+    approvals: { spec: { sha256: 'hash' }, intent: { sha256: 'hash' }, ...approvals },
     verdict,
   });
 
@@ -296,9 +299,7 @@ describe('the standard merge gate', () => {
     assert.equal(nextAction(atMerge('standard'), facts('rework', approvals)).action, 'advance');
   });
 
-  for (const track of ['quick', 'critical']) {
-    test(`${track} needs a person even after a clean review`, () => {
-      assert.equal(nextAction(atMerge(track), facts('pass')).action, 'approve');
-    });
-  }
+  test('critical needs a person even after a clean review', () => {
+    assert.equal(nextAction(atMerge('critical'), facts('pass')).action, 'approve');
+  });
 });

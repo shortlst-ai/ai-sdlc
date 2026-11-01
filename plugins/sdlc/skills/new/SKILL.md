@@ -12,5 +12,5 @@ Start a work item for: $ARGUMENTS
    ```
 
 2. If the session start context asked for it, run `sdlc setup`.
-3. Run `sdlc new <slug>`. For a small fix, pass the files with `--files a,b`, so the track can be worked out. Don't pick a track yourself. You may only raise one with `--track`.
+3. Run `sdlc new <slug>`. Every change takes the same path. If you know it touches a critical path, pass the files with `--files a,b`, so the extra sign-offs apply.
 4. Commit the new item, then continue with `/sdlc:next`.

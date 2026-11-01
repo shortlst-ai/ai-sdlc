@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { parseArgs } = require('node:util');
 
-const { reviewBuild } = require('./check');
+const { changeSize, reviewBuild, reviewSlices } = require('./check');
 const { runGates } = require('./gates');
 const machine = require('./machine');
 const { coverage, detect, intentFor, slugFor } = require('./detect');
@@ -13,6 +13,9 @@ const { collect } = require('./metrics');
 const workspace = require('./workspace');
 
 const { TRACKS, isOpen } = machine;
+
+// `quick` only survives on finished items from before there was one path.
+const CHOOSABLE = TRACKS.filter((track) => track !== 'quick');
 const { SdlcError } = workspace;
 
 const USAGE = `Usage: sdlc <command>
@@ -21,11 +24,11 @@ Commands:
   init [--setup C] [--verify C] [--format C] [--critical a,b] [--protected a,b]
                                      Set up the factory in this repo
   setup                              Build this worktree's environment
-  new <slug> [--files a,b] [--track T]
-                                     Start a work item. Files decide the track
+  new <slug> [--files a,b] [--track critical]
+                                     Start a work item. Critical paths add sign-offs
   status [<id>] [--json]             Show work items and the next action
   changed [<id>]                     List the files this item has changed
-  check [<id>]                       Compare the real diff to the plan's scope
+  check [<id>]                       Compare the real diff to the spec's scope
   verify [<id>]                      Run the verify command and record evidence
   advance [<id>]                     Move to the next stage if its gate passes
   rework [<id>] --reason <text>      Send verify or review back to build
@@ -70,8 +73,8 @@ function parseFiles(value) {
 }
 
 function parseTrack(track) {
-  if (!TRACKS.includes(track)) {
-    throw new SdlcError(`unknown track '${track}': use ${TRACKS.join(', ')}`, 2);
+  if (!CHOOSABLE.includes(track)) {
+    throw new SdlcError(`unknown track '${track}': use ${CHOOSABLE.join(', ')}`, 2);
   }
   return track;
 }
@@ -158,7 +161,12 @@ function check(positionals) {
   const item = workspace.activeItem(root, positionals[0]);
   const { problems } = reviewBuild(root, item, workspace.loadConfig(root));
   if (problems.length > 0) throw new SdlcError(`${item.id}: ${problems.join('; ')}`);
-  console.log(`${item.id}: the changes match the plan.`);
+  console.log(`${item.id}: the changes match the spec.`);
+  const limit = workspace.loadConfig(root).limits.pr_warn_lines ?? 600;
+  const size = changeSize(root, item);
+  if (limit > 0 && size > limit) {
+    console.log(`Warning: ${size} changed lines, over the ${limit} a reviewer can read well. Consider splitting it.`);
+  }
   return 0;
 }
 
@@ -194,8 +202,9 @@ function advance(positionals) {
   let item = workspace.activeItem(root, positionals[0]);
   if (item.stage === 'build') {
     const review = reviewBuild(root, item, workspace.loadConfig(root));
-    if (review.problems.length > 0) {
-      throw new SdlcError(`can't advance ${item.id}: ${review.problems.join('; ')}`);
+    const problems = [...review.problems, ...reviewSlices(root, review.item)];
+    if (problems.length > 0) {
+      throw new SdlcError(`can't advance ${item.id}: ${problems.join('; ')}`);
     }
     if (review.item.track !== item.track) {
       const event = { track: { from: item.track, to: review.item.track }, from: item.stage, to: review.item.stage };
@@ -236,10 +245,7 @@ function track(positionals, values) {
   if (!named && !values.files) throw new SdlcError('sdlc track needs a track or --files', 2);
   const item = workspace.activeItem(root, query);
   const config = workspace.loadConfig(root);
-  // Files add to what the item already declared, so its track is judged on all of
-  // them. A quick item that outgrows its limit gets raised rather than refused.
-  const files = values.files ? [...new Set([...(item.files ?? []), ...parseFiles(values.files)])] : item.files;
-  const candidates = [named, values.files && machine.classify(files, config)];
+  const candidates = [named, values.files && machine.classify(parseFiles(values.files), config)];
   const wanted = candidates.filter(Boolean);
   if (named && machine.trackRank(named) < machine.trackRank(item.track)) {
     throw new SdlcError(`can't lower the track from '${item.track}' to '${named}'`);
@@ -250,12 +256,9 @@ function track(positionals, values) {
   );
   const result = machine.raiseTrack(item, target);
   if (!result.ok) throw new SdlcError(`can't change the track: ${result.reason}`);
-  const added = (files ?? []).filter((file) => !(item.files ?? []).includes(file));
-  if (target !== item.track || added.length > 0) {
-    const event = { from: item.stage, to: result.item.stage };
-    if (target !== item.track) event.track = { from: item.track, to: target };
-    if (added.length > 0) event.files = added;
-    workspace.saveItem(root, record({ ...result.item, files }, event));
+  if (target !== item.track) {
+    const event = { track: { from: item.track, to: target }, from: item.stage, to: result.item.stage };
+    workspace.saveItem(root, record(result.item, event));
   }
   console.log(`${item.id}  ${target}  ${result.item.stage}`);
   return 0;
@@ -335,8 +338,8 @@ function detectCommand(positionals, values) {
   return 0;
 }
 
-// Starts on the critical track so the work begins at the intent gate: a person
-// decides whether this is worth fixing before anything is built.
+// Every item starts at the intent gate, so a person decides whether this is worth
+// fixing before anything is built.
 function breachCommand(positionals, values) {
   const root = requireRoot();
   const open = workspace.openEverywhere(root).map(({ item }) => item.id.replace(/^\d+-/, ''));
@@ -344,7 +347,7 @@ function breachCommand(positionals, values) {
   for (const breach of breaches(values).found) {
     const slug = slugFor(breach);
     if (!open.includes(slug)) {
-      const item = workspace.createItem(root, slug, 'critical', machine.firstStage('critical'));
+      const item = workspace.createItem(root, slug, 'standard', machine.firstStage('standard'));
       workspace.writeArtifact(root, item, 'intent.md', intentFor(breach));
       created.push(item.id);
     }

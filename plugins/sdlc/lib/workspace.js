@@ -17,10 +17,10 @@ const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const DEFAULT_CONFIG = {
   version: 1,
   commands: { setup: null, verify: null, format: null },
-  tracks: { critical: { paths: [] }, quick: { max_files: 3 } },
+  tracks: { critical: { paths: [] } },
   protected: [],
   tests: ['test/**', 'tests/**', '**/*.test.*', '**/*.spec.*', '**/*_test.*', '**/test_*.*'],
-  limits: { rework: 3 },
+  limits: { rework: 3, pr_warn_lines: 600 },
   bands: { ci_failure_rate: { max: 0.25, window: 20, min_runs: 5 } },
 };
 
@@ -110,7 +110,6 @@ function assertConfig(config) {
   const valid =
     config?.version === 1 &&
     Array.isArray(config.tracks?.critical?.paths) &&
-    Number.isInteger(config.tracks?.quick?.max_files) &&
     Array.isArray(config.protected) &&
     Array.isArray(config.tests) &&
     Number.isInteger(config.limits?.rework);
@@ -347,7 +346,7 @@ function createItem(root, slug, track, stage, files = []) {
 function archiveEvidence(root, id, cycle) {
   const dir = path.join(workDir(root), id);
   const archive = path.join(dir, 'evidence', `rework-${cycle}`);
-  for (const file of [ARTIFACTS.verify, ARTIFACTS.review, 'approvals/merge.json']) {
+  for (const file of [ARTIFACTS.verify, ARTIFACTS.review, 'evidence/reviews', 'approvals/merge.json']) {
     const source = path.join(dir, file);
     if (!fs.existsSync(source)) continue;
     fs.mkdirSync(archive, { recursive: true });
@@ -399,6 +398,18 @@ function changedFiles(root, base) {
 
 // Changes when the code changes, so verify evidence can't outlive what it tested.
 // It hashes file contents, so committing the same code doesn't change it.
+function changedLines(root, base) {
+  if (!base) return 0;
+  const output = git(root, ['diff', '--numstat', base, '--', '.', NOT_FACTORY]) ?? '';
+  return output
+    .split('\n')
+    .filter(Boolean)
+    .reduce((sum, line) => {
+      const [added, deleted] = line.split('\t');
+      return sum + (Number(added) || 0) + (Number(deleted) || 0);
+    }, 0);
+}
+
 function codeFingerprint(root, base) {
   if (!base) return null;
   const hash = crypto.createHash('sha256');
@@ -462,6 +473,7 @@ module.exports = {
   archiveEvidence,
   bandsOf,
   changedFiles,
+  changedLines,
   codeFingerprint,
   countStopBlock,
   createItem,

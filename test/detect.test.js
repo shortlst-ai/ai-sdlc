@@ -150,7 +150,7 @@ describe('the commands', () => {
     assert.deepEqual(JSON.parse(sdlc(cwd, 'detect', '--runs', file, '--branch', 'main', '--json').stdout).checked, []);
   });
 
-  test('breach opens an item at the intent gate, on the critical track', (t) => {
+  test('breach opens an item at the intent gate', (t) => {
     const cwd = repo(t);
     const result = sdlc(cwd, 'breach', '--runs', runsFile(cwd, bad()), '--branch', 'main', '--json');
     assert.deepEqual(JSON.parse(result.stdout), { created: ['0001-breach-ci'] });
@@ -158,7 +158,6 @@ describe('the commands', () => {
     const dir = path.join(cwd, '.sdlc', 'work', '0001-breach-ci');
     assert.match(fs.readFileSync(path.join(dir, 'intent.md'), 'utf8'), /failed 6 of its last 6 runs/);
     const [item] = JSON.parse(sdlc(cwd, 'status', '--json').stdout).items;
-    assert.equal(item.track, 'critical');
     assert.equal(item.stage, 'intent');
     assert.deepEqual(item.next, { action: 'approve', stage: 'intent', artifact: 'intent.md' });
   });

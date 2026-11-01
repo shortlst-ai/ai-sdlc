@@ -18,8 +18,6 @@ Run `sdlc status --json` and act on `next`:
 | Stage | Skill |
 | --- | --- |
 | `intent`, `spec` | `/sdlc:spec` |
-| `plan` | `/sdlc:plan` |
-| `reproduce` | `/sdlc:reproduce` |
 | `verify` | `/sdlc:verify` |
 | `review` | `/sdlc:review` |
 | `merge` | `/sdlc:ship` |

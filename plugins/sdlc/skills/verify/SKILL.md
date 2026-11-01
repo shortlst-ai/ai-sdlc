@@ -2,7 +2,7 @@
 description: Prove the current work item works. Use at the verify stage.
 ---
 
-Spawn a `sdlc:verifier` to write acceptance tests for the spec, giving it the work item folder. Use `/sdlc:team` for how. Skip this on the quick track, where the failing test is the proof.
+Spawn a `sdlc:verifier` to write acceptance tests for the spec, giving it the work item folder. Use `/sdlc:team` for how.
 
 Commit, then run `sdlc verify`. It runs the tests and writes the evidence, so never write `evidence/verify.md` yourself.
 

@@ -1,6 +1,6 @@
 ---
 name: researcher
-description: Maps the code a change will touch and reports what exists. Read-only. Use before writing a spec or plan.
+description: Maps the code a change will touch and reports what exists. Read-only. Use before writing a spec.
 tools: Read, Grep, Glob
 model: haiku
 ---

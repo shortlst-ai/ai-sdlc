@@ -58,13 +58,13 @@ function configure(cwd, change) {
 function atBuild(cwd) {
   sdlc(cwd, 'new', 'feature');
   const dir = path.join(cwd, '.sdlc', 'work', '0001-feature');
-  fs.writeFileSync(path.join(dir, 'spec.md'), 'spec');
-  fs.writeFileSync(path.join(dir, 'plan.md'), 'plan');
-  const hash = require('node:crypto').createHash('sha256').update('spec').digest('hex');
+  const hash = require('node:crypto').createHash('sha256').update('text').digest('hex');
   fs.mkdirSync(path.join(dir, 'approvals'));
-  fs.writeFileSync(path.join(dir, 'approvals', 'spec.json'), JSON.stringify({ sha256: hash }));
-  sdlc(cwd, 'advance');
-  sdlc(cwd, 'advance');
+  for (const stage of ['intent', 'spec']) {
+    fs.writeFileSync(path.join(dir, `${stage}.md`), 'text');
+    fs.writeFileSync(path.join(dir, 'approvals', `${stage}.json`), JSON.stringify({ sha256: hash }));
+    sdlc(cwd, 'advance');
+  }
   return dir;
 }
 
@@ -322,7 +322,7 @@ test('session-start lists open work and stays quiet without any', (t) => {
   assert.equal(hook('session-start', { cwd }).stdout, '');
   sdlc(cwd, 'new', 'feature');
   const { stdout } = hook('session-start', { cwd });
-  assert.match(stdout, /0001-feature \(standard\) is at spec, next: write spec.md/);
+  assert.match(stdout, /0001-feature \(standard\) is at intent, next: write intent.md/);
 });
 
 test('hooks.json wires every event and doesn\'t fail closed outside the factory', () => {

@@ -8,7 +8,7 @@
 
 const { execFileSync } = require('node:child_process');
 
-const { reviewBuild } = require('./check');
+const { reviewBuild, reviewSlices } = require('./check');
 const machine = require('./machine');
 const workspace = require('./workspace');
 
@@ -69,7 +69,11 @@ function auditItem(root, id, base, config) {
   if (changed.length > 0 && trackRank(classify(changed, config)) > trackRank(item.track)) {
     problems.push(`its files need the ${classify(changed, config)} track, not ${item.track}`);
   }
-  problems.push(...reviewBuild(root, item, config).problems, ...auditGates(root, item));
+  problems.push(
+    ...reviewBuild(root, item, config).problems,
+    ...reviewSlices(root, item),
+    ...auditGates(root, item),
+  );
   return problems.map((problem) => `${id}: ${problem}`);
 }
 

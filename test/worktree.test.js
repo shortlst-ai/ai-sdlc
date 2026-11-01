@@ -169,7 +169,7 @@ test('with one open item on the branch, commands need no id', (t) => {
   const { dir } = factoryWorktree(t);
   sdlc(dir, 'new', 'feature');
   assert.equal(JSON.parse(sdlc(dir, 'status', '--json').stdout).next.id, '0001-feature');
-  assert.match(sdlc(dir, 'advance').stderr, /write spec\.md/);
+  assert.match(sdlc(dir, 'advance').stderr, /write intent\.md/);
 });
 
 test('session start lists only this branch\'s work', (t) => {
@@ -290,7 +290,7 @@ test('status on the main checkout shows open work in other worktrees', (t) => {
   assert.equal(sdlc(dir, 'new', 'labels').status, 0);
 
   const output = sdlc(root, 'status').stdout;
-  assert.match(output, /0001-labels {2}standard {2}spec {2}next: write spec\.md/);
+  assert.match(output, /0001-labels {2}standard {2}intent {2}next: write intent\.md/);
   assert.match(output, /\(in \.claude\/worktrees\/labels\)/);
   assert.doesNotMatch(output, /No work items yet/);
   assert.doesNotMatch(output, /No open work items/);

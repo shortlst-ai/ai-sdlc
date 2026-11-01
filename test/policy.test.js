@@ -105,12 +105,11 @@ describe('managed and protected files', () => {
 describe('role scopes', () => {
   const during = { items: [open('standard', 'build')] };
 
-  for (const role of ['spec-writer', 'planner']) {
-    test(`${role} writes under .sdlc/ only`, () => {
-      allowed(edit('.sdlc/work/0001-x/plan.md', { role, ...during }));
-      denied(edit('src/a.py', { role, ...during }), /only write under .sdlc/);
-    });
-  }
+  test('spec-writer writes under .sdlc/ only', () => {
+    const role = 'spec-writer';
+    allowed(edit('.sdlc/work/0001-x/spec.md', { role, ...during }));
+    denied(edit('src/a.py', { role, ...during }), /only write under .sdlc/);
+  });
 
   test('verifier writes tests but not source', () => {
     allowed(edit('tests/test_a.py', { role: 'verifier', ...during }));
@@ -135,7 +134,7 @@ describe('stage gate on source files', () => {
     allowed(edit('src/a.py', { items: [open('standard', 'build')] }));
   });
 
-  for (const stage of ['spec', 'plan', 'verify', 'review', 'merge']) {
+  for (const stage of ['intent', 'spec', 'verify', 'review', 'merge']) {
     test(`source can't change at ${stage}`, () => {
       denied(edit('src/a.py', { items: [open('standard', stage)] }), /can't be changed yet/);
     });
@@ -147,42 +146,22 @@ describe('stage gate on source files', () => {
   });
 
   test('one item in build is enough when several are open', () => {
-    allowed(edit('src/a.py', { items: [open('standard', 'spec'), open('quick', 'build')] }));
+    allowed(edit('src/a.py', { items: [open('standard', 'spec'), open('standard', 'build')] }));
   });
 
   test('the refusal says what to do next', () => {
-    denied(edit('src/a.py', { items: [open('standard', 'plan')] }), /0001-x is at plan, next: do the next thing/);
+    denied(edit('src/a.py', { items: [open('standard', 'spec')] }), /0001-x is at spec, next: do the next thing/);
   });
 });
 
 describe('test files', () => {
-  test('quick: the failing test comes first', () => {
-    allowed(edit('tests/test_a.py', { items: [open('quick', 'reproduce')] }));
-  });
-
-  test('quick: tests lock during the fix', () => {
-    const items = [open('quick', 'build')];
-    denied(edit('tests/test_a.py', { role: 'builder', items }), /can't be changed yet/);
-    denied(edit('src/test_helpers.py', { items }), /can't be changed yet/);
-  });
-
-  test('quick: the source fix itself is allowed in build', () => {
-    allowed(edit('src/a.py', { role: 'builder', items: [open('quick', 'build')] }));
-  });
-
-  test('quick: only the verifier touches tests at verify', () => {
-    const items = [open('quick', 'verify')];
-    allowed(edit('tests/test_a.py', { role: 'verifier', items }));
-    denied(edit('tests/test_a.py', { role: 'builder', items }), /can't be changed yet/);
-  });
-
   test('standard: tests can change during build and verify', () => {
     allowed(edit('tests/test_a.py', { items: [open('standard', 'build')] }));
     allowed(edit('tests/test_a.py', { items: [open('standard', 'verify')] }));
   });
 
   test('standard: tests can\'t change before build or after verify', () => {
-    denied(edit('tests/test_a.py', { items: [open('standard', 'plan')] }), /can't be changed yet/);
+    denied(edit('tests/test_a.py', { items: [open('standard', 'spec')] }), /can't be changed yet/);
     denied(edit('tests/test_a.py', { items: [open('standard', 'review')] }), /can't be changed yet/);
   });
 

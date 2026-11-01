@@ -10,43 +10,44 @@ A software factory for Claude Code. `sdlc` is a plugin that takes each change fr
 
 ## How it works
 
-Each change gets a track, which sets how much process it goes through. The track comes from your config and the files involved, and can go up but never down.
+Every change takes the same path, from a typo to a new feature. What changes is how long the documents are, not the steps.
 
 ```mermaid
 flowchart TD
-    start([New change]) --> track{Which track?}
+    start([New change]) --> intent[Write the intent]
+    intent --> gateIntent{{You approve the intent}}
+    gateIntent -->|Changes needed| intent
+    gateIntent --> spec[Write the spec and its slices]
+    spec --> gateSpec{{You approve the spec}}
+    gateSpec -->|Changes needed| spec
 
-    track -->|Small fix| reproduce[Write a failing test]
-    track -->|Normal feature| spec[Write the spec]
-    track -->|Auth, payments, migrations| intent[Write the intent]
+    gateSpec --> build
 
-    intent --> gateIntent{{You approve}}
-    gateIntent --> spec
-    spec --> gateSpec{{You approve}}
-    gateSpec --> plan[Plan the slices]
-    plan --> build
-    reproduce --> build[Build]
+    subgraph slices [Each slice, in order]
+        build[Build it, test first] --> sliceReview[Independent review of this slice]
+        sliceReview -->|Findings| build
+    end
 
-    build --> verify[Verify: tests and scope]
+    sliceReview --> verify[Verify: tests and scope]
+    verify --> final[Final review: how the slices fit]
     verify -->|Fails| build
-    verify --> review[Independent review]
-    review -->|Critical findings| build
-    review --> gateMerge{{You approve, unless a standard change passed review}}
-    gateMerge --> done([You merge the pull request])
-    gateMerge -->|Critical only| gateRelease{{You approve the release}}
-    gateRelease --> done
+    final -->|Critical findings| build
+    final -->|Plain pass| done([You merge the pull request])
+    final -->|Unclear review, or a critical path| gateMerge{{You approve the merge}}
+    gateMerge --> done
+    build -.->|Hole in the spec| gateSpec
 
     classDef you fill:#fde68a,stroke:#b45309,color:#1f2937
-    class gateIntent,gateSpec,gateMerge,gateRelease,done you
+    class gateIntent,gateSpec,gateMerge,done you
 ```
 
 The yellow steps are yours. Everything else runs by itself.
 
-| Track | For | You approve |
-| --- | --- | --- |
-| `quick` | A small fix, in up to three files | The merge |
-| `standard` | A normal feature | The spec, and the merge only if the review didn't plainly pass |
-| `critical` | Auth, payments, migrations | Intent, spec, plan, merge, and release |
+- **Intent** says what's wrong and what would be better. You can stop a weak idea here, before anyone spends time on a spec.
+- **The spec** says exactly what will change, broken into slices. You approve the slices and the files each one may touch, so you know the scope before any code exists.
+- **A slice** is a small step that can be reviewed on its own. An independent reviewer that saw none of the building checks each one, so a mistake is caught before the next slice builds on it.
+
+Two approvals is the normal case. If a path you've marked as critical is touched, the merge and release also need your sign-off.
 
 Inside a change, your session leads a team of agents. Each role can only do its own job: the reviewer can't edit, and the verifier can only write tests.
 
@@ -60,14 +61,20 @@ sequenceDiagram
 
     You->>Lead: /sdlc:new add-csv-export
     Lead->>CLI: What's next?
-    CLI-->>Lead: Write the spec
+    CLI-->>Lead: Write the intent
+    Lead->>Team: Spec writer
+    Team-->>Lead: intent.md
+    Lead-->>You: Please review the intent
+    You->>CLI: /sdlc:approve add-csv-export
     Lead->>Team: Researcher and spec writer
-    Team-->>Lead: spec.md
+    Team-->>Lead: spec.md, with its slices
     Lead-->>You: Please review the spec
     You->>CLI: /sdlc:approve add-csv-export
-    CLI-->>Lead: Approved, carry on
-    Lead->>Team: Planner, builders, verifier, reviewer
-    Team-->>Lead: Code, tests, and evidence
+    loop Each slice
+        Lead->>Team: Builder, then a fresh reviewer
+        Team-->>Lead: Code, tests, and a review
+    end
+    Lead->>Team: Verifier and final review
     Lead->>CI: Open a pull request
     CI->>CI: sdlc gates rechecks everything
     You->>CI: Merge
@@ -131,11 +138,11 @@ Then, in that session:
 Let people export the orders table as CSV.
 ```
 
-The session builds its own environment, and agents research the code and write `spec.md`.
+The session builds its own environment and writes `intent.md`: the problem, the outcome you want, and any open questions.
 
-### 5. Approve the spec
+### 5. Approve the intent
 
-The session stops and shows you the spec, including anything it wants you to decide. If you'd change something, say so, and it updates the spec. When it's right:
+The session stops and shows you the intent. If it's the wrong idea, stop here, because nothing else has been spent yet. Otherwise:
 
 ```text
 /sdlc:approve add-csv-export
@@ -143,19 +150,44 @@ The session stops and shows you the spec, including anything it wants you to dec
 
 You can type this in any Claude session on the repo, so one window can handle all your work. Typing `/sdlc:approve` alone lists what's waiting, and `/sdlc:approve all` approves all of it.
 
+### 6. Approve the spec
+
+Agents research the code and write `spec.md`, including the slices:
+
+````markdown
+### S1: Add the export query
+
+```scope
+src/orders/query.py
+```
+
+### S2: Add the download button
+
+```scope
+src/orders/views.py
+```
+````
+
+Each `scope` block lists what that slice may touch. Anything outside it gets refused later, so check these. If you'd change something, say so, and the session updates the spec. Then approve it the same way.
+
 An approval is tied to the exact text you approved. If the spec changes afterward, the gate reopens.
 
-### 6. Let it run
+### 7. Let it run
 
-The session picks up by itself. It plans the work, builds it, runs your tests, and checks the change against the plan. An independent reviewer then reads the result.
+The session picks up by itself. For each slice, a builder writes it test-first, and a fresh reviewer checks that slice alone. The next slice doesn't start until it passes. Then your tests run, and a final review checks how the slices fit together.
 
-If a step fails, it goes back and fixes it, up to a limit. If it hits that limit, it stops and tells you. You can check on it at any time:
+If a step fails, it goes back and fixes it, up to a limit. If it hits that limit, it stops and tells you. If something turns up mid-build:
+
+- **New work** that this change doesn't need becomes an issue, so the change stays small.
+- **A hole in the spec** means the session amends the spec, which reopens that gate for you to approve.
+
+You can check on it at any time:
 
 ```text
 /sdlc:status
 ```
 
-### 7. Merge
+### 8. Merge
 
 When the review passes, the session opens a pull request. Read it, check that `gates` is green, and merge it yourself.
 
@@ -163,13 +195,7 @@ If your repo has no remote, the session gives you a `git merge` command instead.
 
 ### A smaller change
 
-For a small fix, name the files so the factory can see it's small:
-
-```text
-/sdlc:new fix-date-format src/dates.py,tests/test_dates.py
-```
-
-That puts it on the `quick` track. The session writes a failing test first, and the test is then locked, so the fix can't change it to pass.
+A typo fix takes the same steps, and each one is short: a line of intent, a few lines of spec, and one slice. There's no shortcut, because small changes are where assumptions go unchecked. For a bug fix, the spec says which test should fail first.
 
 ## Commands
 
@@ -215,13 +241,15 @@ This is new software, so here's what has and hasn't been tested.
 
 **Tested on real work**
 
-- Three real changes went through the factory on one project, with no rework
+- Three real changes went through an earlier version on one project, with no rework
 - Forged approvals and a gutted gate were both blocked on GitHub
 - `/sdlc:approve` works from the terminal and the VS Code panel
 - Installing from GitHub works
 
 **Not proven yet**
 
+- **This one-path process hasn't shipped a real change.** Those three changes used the older tracks. It's tested, but not yet used in anger
+- **Test-first is an instruction, not a lock.** Agents are told to write the failing test first, and nothing enforces it
 - **The deploy stage isn't built.** It's parked until there's a project to deploy, and a way to separate the agent from the approver
 - **The CI monitor hasn't run on a live repo.** Its commands are tested, but the workflow itself hasn't run
 - **Some attacks are only tested locally.** Deleting `.sdlc/` is refused on a fresh clone, but hasn't been tried on GitHub, and neither has a pull request that edits `sdlc-gates.yml`

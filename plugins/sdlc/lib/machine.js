@@ -12,10 +12,8 @@ const DONE = 'done';
 const ABANDONED = 'abandoned';
 
 const ARTIFACTS = {
-  reproduce: 'evidence/reproduce.md',
   intent: 'intent.md',
   spec: 'spec.md',
-  plan: 'plan.md',
   verify: 'evidence/verify.md',
   review: 'evidence/review.md',
   // The merge gate approves the review result, so it binds to the same file.
@@ -28,29 +26,24 @@ const ARTIFACTS = {
 // still merges the change either way, so a clean review needn't be signed off twice.
 const REVIEW_GATE = 'unless-review-passes';
 
+// Every change takes this path. Items from before there was one path keep their
+// old `quick` track in state.json, and they're all finished, so it needs no route
+// of its own.
+const ONE_PATH = [
+  { stage: 'intent', gate: true },
+  { stage: 'spec', gate: true },
+  { stage: 'build' },
+  { stage: 'verify' },
+  { stage: 'review' },
+  { stage: 'merge', gate: REVIEW_GATE },
+];
+
+// `critical` isn't a separate route. Risky paths add sign-offs to the same path.
 const FLOWS = {
-  quick: [
-    { stage: 'reproduce' },
-    { stage: 'build' },
-    { stage: 'verify' },
-    { stage: 'review' },
-    { stage: 'merge', gate: true },
-  ],
-  standard: [
-    { stage: 'spec', gate: true },
-    { stage: 'plan' },
-    { stage: 'build' },
-    { stage: 'verify' },
-    { stage: 'review' },
-    { stage: 'merge', gate: REVIEW_GATE },
-  ],
+  quick: ONE_PATH,
+  standard: ONE_PATH,
   critical: [
-    { stage: 'intent', gate: true },
-    { stage: 'spec', gate: true },
-    { stage: 'plan', gate: true },
-    { stage: 'build' },
-    { stage: 'verify' },
-    { stage: 'review' },
+    ...ONE_PATH.slice(0, -1),
     { stage: 'merge', gate: true },
     { stage: 'release', gate: true },
   ],
@@ -103,13 +96,9 @@ function matchesAny(file, globs) {
   return globs.some((glob) => globToRegExp(glob).test(normalized));
 }
 
-// Decides the track from the files a change touches. With no files there is
-// nothing to classify on, so the change gets the normal process.
+// Critical paths add sign-offs. Everything else takes the ordinary path.
 function classify(files, config) {
-  if (files.length === 0) return 'standard';
-  if (files.some((file) => matchesAny(file, config.tracks.critical.paths))) return 'critical';
-  if (files.length <= config.tracks.quick.max_files) return 'quick';
-  return 'standard';
+  return files.some((file) => matchesAny(file, config.tracks.critical.paths)) ? 'critical' : 'standard';
 }
 
 // `facts.artifacts` maps artifact paths to their hash, or null when missing.
@@ -181,8 +170,7 @@ function rework(item, limit) {
   return { ok: true, item: { ...item, stage: 'build', rework: item.rework + 1 } };
 }
 
-// Stages the new track doesn't have restart at its first stage, so a change
-// raised off the quick track backfills the artifacts it skipped.
+// A stage the new track doesn't have restarts at its first stage.
 function raiseTrack(item, track) {
   if (!isOpen(item)) return { ok: false, reason: `${item.id} is already ${item.stage}` };
   if (trackRank(track) < trackRank(item.track)) {

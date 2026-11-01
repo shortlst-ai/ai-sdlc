@@ -11,7 +11,7 @@ const { test } = require('node:test');
 const PLUGIN = path.join(__dirname, '..', 'plugins', 'sdlc');
 const CLI = path.join(PLUGIN, 'bin', 'sdlc');
 const ID = '0001-feature';
-const PLAN = '```scope\nsrc/**\n```\n';
+const SPEC = '### S1: The change\n\n```scope\nsrc/**\n```\n';
 
 function env() {
   return { ...process.env, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1' };
@@ -72,12 +72,14 @@ function finished(t, options) {
   git(cwd, 'switch', '-q', '-c', 'feature');
   if (options) setCritical(cwd, []);
   sdlc(cwd, 'new', 'feature');
-  touch(cwd, item('spec.md'), 'spec');
-  approve(cwd, 'spec', 'spec');
-  touch(cwd, item('plan.md'), PLAN);
+  touch(cwd, item('intent.md'), 'intent');
+  approve(cwd, 'intent', 'intent');
   sdlc(cwd, 'advance');
+  touch(cwd, item('spec.md'), SPEC);
+  approve(cwd, 'spec', SPEC);
   sdlc(cwd, 'advance');
   touch(cwd, 'src/a.py');
+  touch(cwd, item('evidence/reviews/S1.md'), 'Verdict: pass\n');
   sdlc(cwd, 'advance');
   sdlc(cwd, 'verify');
   sdlc(cwd, 'advance');
@@ -178,12 +180,14 @@ function reviewed(t, report) {
   const cwd = repo(t);
   git(cwd, 'switch', '-q', '-c', 'feature');
   sdlc(cwd, 'new', 'feature');
-  touch(cwd, item('spec.md'), 'spec');
-  approve(cwd, 'spec', 'spec');
-  touch(cwd, item('plan.md'), PLAN);
+  touch(cwd, item('intent.md'), 'intent');
+  approve(cwd, 'intent', 'intent');
   sdlc(cwd, 'advance');
+  touch(cwd, item('spec.md'), SPEC);
+  approve(cwd, 'spec', SPEC);
   sdlc(cwd, 'advance');
   touch(cwd, 'src/a.py');
+  touch(cwd, item('evidence/reviews/S1.md'), 'Verdict: pass\n');
   sdlc(cwd, 'advance');
   sdlc(cwd, 'verify');
   sdlc(cwd, 'advance');
@@ -225,11 +229,10 @@ test('a critical change can pass every gate through to release', (t) => {
   };
   write('intent.md', 'intent', 'intent');
   assert.equal(sdlc(cwd, 'advance').status, 0);
-  write('spec.md', 'spec', 'spec');
-  assert.equal(sdlc(cwd, 'advance').status, 0);
-  write('plan.md', PLAN, 'plan');
+  write('spec.md', SPEC, 'spec');
   assert.equal(sdlc(cwd, 'advance').status, 0);
   touch(cwd, 'src/a.py');
+  write('evidence/reviews/S1.md', 'Verdict: pass\n');
   assert.equal(sdlc(cwd, 'advance').status, 0);
   assert.equal(sdlc(cwd, 'verify').status, 0);
   assert.equal(sdlc(cwd, 'advance').status, 0);
@@ -260,6 +263,21 @@ test('a critical change with no release sign-off fails', (t) => {
   assert.ok(problems(cwd).some((problem) => /release: no approval/.test(problem)));
 });
 
+test('the server rechecks slice reviews, so deleting one fails', (t) => {
+  const cwd = finished(t);
+  fs.rmSync(path.join(cwd, item('evidence/reviews/S1.md')));
+  commitAll(cwd);
+  assert.equal(gates(cwd).status, 1);
+  assert.match(problems(cwd).join(), /slice S1 has no review/);
+});
+
+test('the server rechecks slice reviews, so a failed one fails', (t) => {
+  const cwd = finished(t);
+  touch(cwd, item('evidence/reviews/S1.md'), 'Verdict: rework\n');
+  commitAll(cwd);
+  assert.match(problems(cwd).join(), /slice S1 didn't pass its review/);
+});
+
 test('code with no work item fails', (t) => {
   const cwd = repo(t);
   git(cwd, 'switch', '-q', '-c', 'feature');
@@ -278,7 +296,7 @@ test('a forged approval with the wrong hash fails', (t) => {
 
 test('an approval naming nobody fails', (t) => {
   const cwd = finished(t);
-  touch(cwd, item('approvals/spec.json'), JSON.stringify({ sha256: sha('spec') }));
+  touch(cwd, item('approvals/spec.json'), JSON.stringify({ sha256: sha(SPEC) }));
   commitAll(cwd);
   assert.match(problems(cwd).join(), /the approval names nobody/);
 });
@@ -316,14 +334,14 @@ test('editing the base in state.json can\'t hide work', (t) => {
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
   editState(cwd, { base: head });
   commitAll(cwd);
-  assert.match(problems(cwd).join(), /outside the plan's scope: secret-work\.py/);
+  assert.match(problems(cwd).join(), /outside the spec's scope: secret-work\.py/);
 });
 
-test('work outside the plan fails even when committed', (t) => {
+test('work outside the spec fails even when committed', (t) => {
   const cwd = finished(t);
   touch(cwd, 'docs/extra.md');
   commitAll(cwd);
-  assert.match(problems(cwd).join(), /outside the plan's scope: docs\/extra\.md/);
+  assert.match(problems(cwd).join(), /outside the spec's scope: docs\/extra\.md/);
 });
 
 test('code changed after verify fails', (t) => {
@@ -338,7 +356,7 @@ test('an unfinished item fails', (t) => {
   git(cwd, 'switch', '-q', '-c', 'feature');
   sdlc(cwd, 'new', 'feature');
   commitAll(cwd);
-  assert.match(problems(cwd).join(), /it's at spec, not finished/);
+  assert.match(problems(cwd).join(), /it's at intent, not finished/);
 });
 
 test('an abandoned item fails', (t) => {
