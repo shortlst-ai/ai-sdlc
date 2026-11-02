@@ -35,6 +35,8 @@ Tell them to merge before ending this session and removing the worktree, because
 
 Commit `.sdlc/` whenever this skill finishes a step, so a resumed session can pick up from Git.
 
+You don't need to read the factory's own source. `sdlc --help`, these skills, and what a command prints tell you everything, and reading outside this repo stops the session at a permission prompt.
+
 Run each command on its own, without `;`, `&&`, or `echo` added. The project allows `sdlc` commands, and a chained command needs every part allowed, so chaining stops the work at a permission prompt.
 
 If a command refuses, read why and fix the cause. Never work around a refusal. If you can't fix it, stop and tell the person.

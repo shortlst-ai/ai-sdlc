@@ -60,9 +60,22 @@ function reviewSlices(root, item) {
   });
 }
 
-// Added and deleted lines outside the factory's own files.
-function changeSize(root, item) {
-  return workspace.changedLines(root, item.base);
+// Advice, never a refusal. Size alone can't say a change is wrong, only that a
+// person should look. Tests outweighing code by this much is usually repetition.
+const TEST_RATIO = 3;
+const TEST_FLOOR = 200;
+
+function sizeWarnings(root, item, config) {
+  const { code, tests } = workspace.changedLines(root, item.base, config.tests);
+  const limit = config.limits.pr_warn_lines ?? 600;
+  const warnings = [];
+  if (limit > 0 && code + tests > limit) {
+    warnings.push(`${code + tests} changed lines, over the ${limit} a reviewer can read well. Consider splitting it.`);
+  }
+  if (tests > TEST_FLOOR && tests > code * TEST_RATIO) {
+    warnings.push(`${tests} lines of tests for ${code} lines of code. Check they aren't repeating each other.`);
+  }
+  return warnings;
 }
 
-module.exports = { changeSize, outOfScope, parseScope, parseSlices, reviewBuild, reviewSlices };
+module.exports = { outOfScope, parseScope, parseSlices, reviewBuild, reviewSlices, sizeWarnings };

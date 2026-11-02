@@ -249,6 +249,24 @@ describe('slices', () => {
     assert.match(result.stdout, /Warning: 700 changed lines/);
   });
 
+  test('tests that dwarf the code get a warning, not a refusal', (t) => {
+    const cwd = atBuild(t);
+    touch(cwd, 'src/api/a.py', 'line\n'.repeat(50));
+    touch(cwd, 'tests/test_a.py', 'line\n'.repeat(400));
+    commitAll(cwd);
+    const result = sdlc(cwd, 'check');
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Warning: 400 lines of tests for 50 lines of code/);
+  });
+
+  test('a healthy amount of tests gets no warning', (t) => {
+    const cwd = atBuild(t);
+    touch(cwd, 'src/api/a.py', 'line\n'.repeat(100));
+    touch(cwd, 'tests/test_a.py', 'line\n'.repeat(250));
+    commitAll(cwd);
+    assert.doesNotMatch(sdlc(cwd, 'check').stdout, /Warning/);
+  });
+
   test('a small change gets no warning', (t) => {
     const cwd = atBuild(t);
     touch(cwd, 'src/api/a.py');

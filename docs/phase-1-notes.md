@@ -39,3 +39,22 @@ What the first real runs showed, for the Phase 2 review. These are observations 
 ## What the reviewer can't see
 
 The reviewer has read-only tools, so it can't run anything. On the harvester item, a person's check found what it couldn't: the old-code bug was unproven until someone ran it, and a spec read at the gate was a draft that had changed by the time it was committed. A gate should show only committed text. Nothing enforces that yet.
+
+## First real change on one path
+
+The signed-URL fix on `RCTResources`, 2026-11-01. Two approvals, no rework, three slices, and no merge gate.
+
+| Stage | Agent time |
+| --- | --- |
+| Intent | 1 minute |
+| Spec | 5.5 minutes, plus about 18 lost to a permission prompt and a dropped message |
+| Build, with slice reviews | 25.5 minutes |
+| Verify | 9 minutes |
+| Final review | 2 minutes |
+
+About 43 minutes in all, against about 18 for the curate fix on the old `quick` track. The change was larger, so this isn't a clean comparison, but one path does cost more.
+
+- **Volume is the main problem.** About 80 lines of source came with over 1,400 lines of tests, and the suite grew by 120 tests. A reviewer found them repeated across three files. Agents now have firmer limits, and `sdlc check` warns when tests far outweigh code.
+- **The firmer wording is unproven.** The old wording also passes the eval on a typo, and the long spec came from a real small fix, which an eval can't cheaply test. Watch the next real change.
+- **The spec was worth reading.** It found two more places a signed URL could reach the terminal. Reading it also caught a slice that would have failed the scope check.
+- **The permission prompt came back,** on a session double-checking a claim by reading the factory's source. Sessions are now told not to, which is an instruction, not a fix.

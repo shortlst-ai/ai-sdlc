@@ -33,4 +33,4 @@ Test files are always in scope, so don't list them. Most small changes are one s
 
 For a bug fix, say which test should fail first.
 
-Keep both as short as the change allows. A typo fix gets a few lines. Flag anything you had to assume rather than deciding quietly.
+Keep both as short as the change allows. This is a limit, not a preference: `intent.md` fits on one screen, and a small fix gets a `spec.md` of about 30 lines with one slice. Longer is fine only when the change really is larger. Leave out reasoning about how the code works, and anything the reviewer or the tests will check anyway. Say what changes, not how you worked it out. Flag anything you had to assume rather than deciding quietly.

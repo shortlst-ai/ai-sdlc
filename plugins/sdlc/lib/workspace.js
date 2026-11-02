@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { ARTIFACTS, FLOWS, isOpen, isValidItem, reviewVerdict } = require('./machine');
+const { ARTIFACTS, FLOWS, isOpen, isValidItem, matchesAny, reviewVerdict } = require('./machine');
 
 const SDLC_DIR = '.sdlc';
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -400,16 +400,17 @@ function changedFiles(root, base) {
 // It hashes file contents, so committing the same code doesn't change it. Untracked
 // files don't count, because running tests can write caches, and those would make
 // good evidence look stale.
-function changedLines(root, base) {
-  if (!base) return 0;
-  const output = git(root, ['diff', '--numstat', base, '--', '.', NOT_FACTORY]) ?? '';
-  return output
-    .split('\n')
-    .filter(Boolean)
-    .reduce((sum, line) => {
-      const [added, deleted] = line.split('\t');
-      return sum + (Number(added) || 0) + (Number(deleted) || 0);
-    }, 0);
+// Added and deleted lines, split into tests and everything else.
+function changedLines(root, base, testGlobs) {
+  const size = { code: 0, tests: 0 };
+  if (!base) return size;
+  const output = git(root, ['diff', '--numstat', '--no-renames', base, '--', '.', NOT_FACTORY]) ?? '';
+  for (const line of output.split('\n').filter(Boolean)) {
+    const [added, deleted, ...file] = line.split('\t');
+    const key = matchesAny(file.join('\t'), testGlobs) ? 'tests' : 'code';
+    size[key] += (Number(added) || 0) + (Number(deleted) || 0);
+  }
+  return size;
 }
 
 function codeFingerprint(root, base) {

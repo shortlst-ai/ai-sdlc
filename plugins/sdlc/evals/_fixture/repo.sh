@@ -35,7 +35,7 @@ base_repo() {
   git config user.name Ada
   git config user.email ada@example.com
   install_cli
-  printf 'def add(a, b):\n    return a + b\n' >calc.py
+  printf 'def add(a, b):\n    """Add and retrun the sum."""\n    return a + b\n' >calc.py
   sdlc init --verify true >/dev/null
   commit 'Adopt the factory'
 }
@@ -43,6 +43,16 @@ base_repo() {
 on_a_worktree_branch() {
   base_repo
   git switch -q -c worktree-feature
+}
+
+# Past the intent gate on a tiny change, with the spec still to write.
+at_small_spec() {
+  on_a_worktree_branch
+  sdlc new feature >/dev/null
+  printf '# Intent\n\nThe docstring on add has a typo: it says retrun. Fix it.\n' >"$ITEM/intent.md"
+  approval intent intent.md
+  sdlc advance >/dev/null
+  commit 'Approve the intent'
 }
 
 at_spec_gate() {
