@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: small-change-gets-a-short-spec
+context:
+  scaffold_script: fixture.sh

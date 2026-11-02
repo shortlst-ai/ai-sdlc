@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { parseArgs } = require('node:util');
 
-const { changeSize, reviewBuild, reviewSlices } = require('./check');
+const { reviewBuild, reviewSlices, sizeWarnings } = require('./check');
 const { runGates } = require('./gates');
 const machine = require('./machine');
 const { coverage, detect, intentFor, slugFor } = require('./detect');
@@ -162,10 +162,8 @@ function check(positionals) {
   const { problems } = reviewBuild(root, item, workspace.loadConfig(root));
   if (problems.length > 0) throw new SdlcError(`${item.id}: ${problems.join('; ')}`);
   console.log(`${item.id}: the changes match the spec.`);
-  const limit = workspace.loadConfig(root).limits.pr_warn_lines ?? 600;
-  const size = changeSize(root, item);
-  if (limit > 0 && size > limit) {
-    console.log(`Warning: ${size} changed lines, over the ${limit} a reviewer can read well. Consider splitting it.`);
+  for (const warning of sizeWarnings(root, item, workspace.loadConfig(root))) {
+    console.log(`Warning: ${warning}`);
   }
   return 0;
 }
